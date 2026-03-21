@@ -1,0 +1,16 @@
+# Study 0 Ablation sweep config
+
+defaults:
+  - _self_
+
+experiment: ablations
+study: study0
+
+sweep:
+  n_layers: [1, 2, 3, 6]
+  d_token: [64, 128, 192, 256]
+  mask_ratio: [0.10, 0.15, 0.20, 0.30]
+  train_fractions: [0.10, 0.25, 0.50, 0.75, 1.00]
+
+results_dir: results/study0/ablations
+seed: 42

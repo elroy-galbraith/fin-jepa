@@ -1,0 +1,56 @@
+# Study 0 Benchmark experiment config (Hydra)
+
+defaults:
+  - _self_
+
+experiment: benchmark
+study: study0
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  splits_dir: data/splits
+  split:
+    train_end: "2017-12-31"
+    val_end:   "2019-12-31"
+    test_end:  "2023-12-31"
+
+outcomes:
+  - stock_decline
+  - earnings_restate
+  - audit_qualification
+  - sec_enforcement
+  - bankruptcy
+
+ft_transformer:
+  d_token: 192
+  n_heads: 8
+  n_layers: 3
+  d_ffn_factor: 4
+  dropout: 0.0
+  n_outputs: 1
+
+xgboost:
+  n_estimators: 500
+  learning_rate: 0.05
+  max_depth: 6
+  subsample: 0.8
+  colsample_bytree: 0.8
+
+logistic_regression:
+  C: 1.0
+  max_iter: 1000
+
+training:
+  batch_size: 256
+  epochs: 100
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  patience: 10       # early stopping patience (epochs)
+  seed: 42
+
+gate:
+  min_wins: 3        # FT-Transformer must win >= 3/5 outcomes
+  auroc_margin: 0.01 # by at least this AUROC margin
+
+results_dir: results/study0

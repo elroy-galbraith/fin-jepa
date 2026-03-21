@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+.cache/
+*.whl
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_metadata/
+
+# Data — raw and processed data are not committed
+data/raw/
+data/processed/
+data/interim/
+data/external/
+*.parquet
+*.csv
+*.feather
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+# Exception: keep small fixture files in tests
+!tests/fixtures/**
+
+# Model checkpoints and artifacts
+models/checkpoints/
+models/pretrained/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Results / outputs (keep paper assets)
+results/runs/
+results/cache/
+mlruns/
+
+# Configs with secrets
+.env
+.env.*
+secrets/
+config/local/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Mypy
+.mypy_cache/
+
+# Type stubs
+*.pyi.bak

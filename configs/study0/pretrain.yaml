@@ -1,0 +1,34 @@
+# Study 0 SSL Pretraining config (Hydra)
+
+defaults:
+  - _self_
+
+experiment: pretrain
+study: study0
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  splits_dir: data/splits
+
+ssl:
+  mask_ratio: 0.15
+  reconstruction_loss: mse    # mse | huber
+
+ft_transformer:
+  d_token: 192
+  n_heads: 8
+  n_layers: 3
+  d_ffn_factor: 4
+  dropout: 0.0
+
+training:
+  batch_size: 512
+  epochs: 200
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  warmup_epochs: 10
+  seed: 42
+
+checkpoint_dir: models/checkpoints/study0_pretrain
+results_dir: results/study0
