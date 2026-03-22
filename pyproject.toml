@@ -81,4 +81,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=fin_jepa --cov-report=term-missing"
+addopts = "--cov=fin_jepa --cov-report=term-missing -m 'not smoke'"
+markers = [
+    "smoke: end-to-end tests that hit real external APIs (EDGAR)",
+]
