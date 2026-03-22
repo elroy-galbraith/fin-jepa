@@ -122,13 +122,40 @@ FF12_SECTORS: list[str] = [
 def _build_sic_table() -> dict[int, str]:
     """Pre-compute a flat SIC → sector dict from the range definitions.
 
-    Processes rules in order so more-specific ranges (added later) override
-    more-general ones. The full dict covers SIC 0–9999.
+    **Override rule**: ``_FF12_RANGES`` is processed in order and the *last*
+    entry wins for any SIC code claimed by multiple ranges.  This is
+    intentional: narrow sub-ranges (e.g. ``(2800, 2824, "Chemicals")``)
+    are placed *after* their enclosing ranges so they take precedence.
+
+    A WARNING is emitted at import time for every SIC code where one range
+    overrides a previous one.  This surfaces unintended overlaps introduced
+    by future edits to ``_FF12_RANGES`` (W4).
     """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    first_claim: dict[int, str] = {}   # sic → sector that first claimed it
     table: dict[int, str] = {}
+    overrides: list[str] = []
+
     for start, end, sector in _FF12_RANGES:
         for sic in range(start, end + 1):
+            if sic in first_claim and first_claim[sic] != sector:
+                overrides.append(
+                    f"  SIC {sic:04d}: '{first_claim[sic]}' → '{sector}'"
+                )
+            else:
+                first_claim[sic] = sector
             table[sic] = sector
+
+    if overrides:
+        _log.warning(
+            "sector_map: %d intentional SIC override(s) detected "
+            "(later _FF12_RANGES entry wins):\n%s",
+            len(overrides),
+            "\n".join(overrides),
+        )
+
     return table
 
 

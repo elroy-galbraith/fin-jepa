@@ -56,13 +56,21 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from fin_jepa.data.sector_map import sic_to_sector
+
+# ---------------------------------------------------------------------------
+# Optional dependency: requests (W8)
+# ---------------------------------------------------------------------------
+try:
+    import requests as _requests_module
+except ImportError:
+    _requests_module = None
 
 logger = logging.getLogger(__name__)
 
@@ -119,47 +127,48 @@ class UniverseConfig:
 # ---------------------------------------------------------------------------
 
 def _get_session():
-    """Create a requests.Session with EDGAR-compliant headers."""
-    try:
-        import requests
-    except ImportError as exc:
+    """Create a requests.Session with EDGAR-compliant headers.
+
+    .. note::
+        Do NOT hard-code a ``Host`` header here.  The HTTP stack derives
+        the correct ``Host`` value from each request URL, allowing the same
+        session to target both ``www.sec.gov`` and ``data.sec.gov`` without
+        silently sending the wrong value (C1).
+    """
+    if _requests_module is None:
         raise ImportError(
             "The 'requests' package is required. "
             "Install with: pip install requests"
-        ) from exc
-    session = requests.Session()
+        )
+    session = _requests_module.Session()
     # EDGAR requires a descriptive User-Agent per their fair-use policy
     session.headers.update({
         "User-Agent": os.environ.get("EDGAR_USER_AGENT", _DEFAULT_USER_AGENT),
         "Accept-Encoding": "gzip, deflate",
-        "Host": "www.sec.gov",
     })
     return session
 
 
-def _fetch_url(url: str, session, retries: int = 3, backoff: float = 2.0) -> str:
-    """Fetch a URL with exponential-backoff retry on transient errors."""
+def _fetch(url: str, session, *, as_json: bool = False, retries: int = 3, backoff: float = 2.0):
+    """Fetch a URL with exponential-backoff retry on transient errors (W1).
+
+    Args:
+        url: URL to fetch.
+        session: requests.Session to use.
+        as_json: If True, parse and return the response as JSON; otherwise
+            return the response text.
+        retries: Number of attempts (clamped to ≥ 1; passing 0 is safe).
+        backoff: Multiplier for exponential back-off between retries.
+
+    Returns:
+        Parsed JSON dict (``as_json=True``) or raw text string.
+    """
+    retries = max(retries, 1)
     for attempt in range(retries):
         try:
             resp = session.get(url, timeout=30)
             resp.raise_for_status()
-            return resp.text
-        except Exception as exc:
-            if attempt == retries - 1:
-                raise
-            wait = backoff ** attempt
-            logger.warning("Retry %d/%d for %s after %.1fs: %s", attempt + 1, retries, url, wait, exc)
-            time.sleep(wait)
-    raise RuntimeError(f"Failed to fetch {url}")  # unreachable
-
-
-def _fetch_json(url: str, session, retries: int = 3, backoff: float = 2.0) -> dict:
-    """Fetch a URL and parse as JSON."""
-    for attempt in range(retries):
-        try:
-            resp = session.get(url, timeout=30)
-            resp.raise_for_status()
-            return resp.json()
+            return resp.json() if as_json else resp.text
         except Exception as exc:
             if attempt == retries - 1:
                 raise
@@ -275,7 +284,7 @@ def fetch_quarterly_index(
     if session is None:
         session = _get_session()
 
-    content = _fetch_url(url, session)
+    content = _fetch(url, session)
     df = _parse_form_idx(content)
 
     # Filter to requested form types
@@ -366,14 +375,20 @@ def fetch_company_tickers(cache_dir: Path, session=None) -> pd.DataFrame:
     if session is None:
         session = _get_session()
 
-    data = _fetch_json(url, session)
+    data = _fetch(url, session, as_json=True)
     fields = data.get("fields", ["cik", "name", "ticker", "exchange"])
     rows = data.get("data", [])
 
     df = pd.DataFrame(rows, columns=fields)
     df["cik"] = df["cik"].astype(str).str.zfill(10)
-    # Keep only the first ticker/exchange per CIK (primary listing)
-    df = df.drop_duplicates(subset="cik", keep="first")
+    # Prefer primary-exchange listings over OTC / foreign venues (W5).
+    # For dual-listed companies the first Nasdaq/NYSE/NYSE MKT row wins;
+    # companies absent from those exchanges fall back to first occurrence.
+    _PRIMARY_EXCHANGES = {"Nasdaq", "NYSE", "NYSE MKT"}
+    primary_mask = df["exchange"].isin(_PRIMARY_EXCHANGES)
+    df_primary = df[primary_mask].drop_duplicates(subset="cik", keep="first")
+    df_rest = df[~df["cik"].isin(df_primary["cik"])].drop_duplicates(subset="cik", keep="first")
+    df = pd.concat([df_primary, df_rest], ignore_index=True)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache_path, index=False)
@@ -413,10 +428,9 @@ def fetch_company_submissions(
     url = f"{EDGAR_DATA_BASE}/submissions/CIK{cik_padded}.json"
     if session is None:
         session = _get_session()
-        session.headers["Host"] = "data.sec.gov"
 
     try:
-        data = _fetch_json(url, session)
+        data = _fetch(url, session, as_json=True)
     except Exception as exc:
         logger.debug("Could not fetch submissions for CIK %s: %s", cik_padded, exc)
         return {}
@@ -467,14 +481,16 @@ def fetch_all_submissions(
 
     def _throttled_fetch(cik: str) -> tuple[str, dict]:
         session = _get_session()
-        session.headers["Host"] = "data.sec.gov"
-        # Enforce rate limit
+        # Enforce rate limit: compute the required sleep duration while
+        # holding the lock, then release before sleeping so other threads
+        # are not serialized waiting on the sleep itself (W2).
         with lock:
             now = time.monotonic()
             elapsed = now - last_request_time[0]
-            if elapsed < min_sleep:
-                time.sleep(min_sleep - elapsed)
-            last_request_time[0] = time.monotonic()
+            sleep_time = max(0.0, min_sleep - elapsed)
+            last_request_time[0] = time.monotonic() + sleep_time
+        if sleep_time > 0:
+            time.sleep(sleep_time)
         sub = fetch_company_submissions(cik, cache_dir, session)
         return cik.zfill(10), _extract_submissions_metadata(sub)
 
@@ -529,48 +545,50 @@ def audit_xbrl_coverage(filings_df: pd.DataFrame) -> pd.DataFrame:
     filings_10k = filings_df[filings_df["form_type"] == "10-K"].copy()
     xbrl_cutoff = pd.Timestamp(XBRL_MANDATORY_DATE)
 
-    records: list[dict] = []
-    for cik, grp in filings_10k.groupby("cik"):
-        grp = grp.sort_values("date_filed")
-        n_total = len(grp)
-        n_xbrl = int((grp["date_filed"] >= xbrl_cutoff).sum())
-        pct = n_xbrl / n_total if n_total > 0 else 0.0
-
-        years = sorted(grp["filing_year"].dropna().astype(int).unique().tolist())
-        first_date = grp["date_filed"].min().date()
-        last_date = grp["date_filed"].max().date()
-
-        # Gap years: years in [first_year, last_year] missing a 10-K
-        if years:
-            full_range = set(range(years[0], years[-1] + 1))
-            gap_years = sorted(full_range - set(years))
-        else:
-            gap_years = []
-
-        final_two = {last_date.year, last_date.year - 1}
-        is_current = bool(set(years) & final_two)
-
-        records.append({
-            "cik": cik,
-            "n_10k_filings": n_total,
-            "n_xbrl_filings": n_xbrl,
-            "xbrl_coverage_pct": round(pct, 4),
-            "xbrl_gap_flag": pct < 0.95,
-            "first_10k_date": first_date,
-            "last_10k_date": last_date,
-            "filing_years": years,
-            "gap_years": gap_years,
-            "is_current_filer": is_current,
-        })
-
-    if not records:
+    if filings_10k.empty:
         empty_cols = [
             "cik", "n_10k_filings", "n_xbrl_filings", "xbrl_coverage_pct",
             "xbrl_gap_flag", "first_10k_date", "last_10k_date",
             "filing_years", "gap_years", "is_current_filer",
         ]
         return pd.DataFrame(columns=empty_cols).set_index("cik")
-    return pd.DataFrame(records).set_index("cik")
+
+    filings_10k = filings_10k.copy()
+    filings_10k["_is_xbrl"] = filings_10k["date_filed"] >= xbrl_cutoff
+
+    # Vectorized groupby aggregation replaces the pure-Python loop (W3)
+    agg = filings_10k.groupby("cik").agg(
+        n_10k_filings=("date_filed", "count"),
+        n_xbrl_filings=("_is_xbrl", "sum"),
+        first_10k_date=("date_filed", "min"),
+        last_10k_date=("date_filed", "max"),
+        filing_years=(
+            "filing_year",
+            lambda s: sorted(s.dropna().astype(int).unique().tolist()),
+        ),
+    )
+    agg["n_xbrl_filings"] = agg["n_xbrl_filings"].astype(int)
+    agg["xbrl_coverage_pct"] = (
+        agg["n_xbrl_filings"] / agg["n_10k_filings"].clip(lower=1)
+    ).round(4)
+    agg["xbrl_gap_flag"] = agg["xbrl_coverage_pct"] < 0.95
+    agg["first_10k_date"] = agg["first_10k_date"].dt.date
+    agg["last_10k_date"] = agg["last_10k_date"].dt.date
+
+    agg["gap_years"] = agg["filing_years"].apply(
+        lambda years: (
+            sorted(set(range(years[0], years[-1] + 1)) - set(years))
+            if years else []
+        )
+    )
+    agg["is_current_filer"] = agg.apply(
+        lambda row: bool(
+            set(row["filing_years"])
+            & {row["last_10k_date"].year, row["last_10k_date"].year - 1}
+        ),
+        axis=1,
+    )
+    return agg
 
 
 # ---------------------------------------------------------------------------
@@ -709,7 +727,7 @@ def build_company_universe(
     universe = universe.reset_index()
 
     # ── Step 8: Provenance metadata ──────────────────────────────────────────
-    build_date = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    build_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")  # W6
     provenance = {
         "build_date": build_date,
         "start_year": start_year,
@@ -736,8 +754,10 @@ def build_company_universe(
         table = table.replace_schema_metadata(meta)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, output_path)
-    except Exception:
-        # Fallback: plain parquet without embedded metadata
+    except ImportError:
+        # pyarrow not available — fall back to plain parquet without
+        # embedded metadata (C2: only ImportError warrants this fallback;
+        # disk/permission errors should propagate so callers can react).
         output_path.parent.mkdir(parents=True, exist_ok=True)
         universe.to_parquet(output_path, index=False)
         # Write provenance as sidecar JSON

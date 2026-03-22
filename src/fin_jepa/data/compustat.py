@@ -102,9 +102,16 @@ def load_compustat_crossref(path: Path | str) -> pd.DataFrame:
     if "gvkey" in df.columns:
         df["gvkey"] = df["gvkey"].astype(str).str.zfill(6)
     if "cik" in df.columns:
+        # Exclude NaN, empty strings, and the literal string "nan" which
+        # passes notna() and would corrupt CIK after zero-padding (C3).
+        _cik_str = df["cik"].astype(str).str.strip()
         df["cik"] = (
             df["cik"]
-            .where(df["cik"].notna() & (df["cik"].astype(str).str.strip() != ""))
+            .where(
+                df["cik"].notna()
+                & (_cik_str != "")
+                & (_cik_str.str.lower() != "nan")
+            )
             .astype("string")
             .str.strip()
             .str.zfill(10)
@@ -172,11 +179,21 @@ def merge_compustat(
     # Only keep columns that exist in compustat_df
     keep = {src: dst for src, dst in compustat_cols.items() if src in compustat_df.columns}
 
-    cstat = compustat_df[["cik"] + list(keep.keys())].rename(columns=keep).copy()
-    # Drop rows where CIK is null (can't match on CIK alone)
-    cstat_with_cik = cstat.dropna(subset=["cik"]).drop_duplicates(subset="cik", keep="first")
-
-    merged = universe_df.merge(cstat_with_cik, on="cik", how="left")
+    if "cik" not in compustat_df.columns:
+        # W7: Compustat export lacks a CIK column — skip CIK-primary join
+        # and fall through to the ticker-based fallback path below.
+        logger.warning(
+            "Compustat DataFrame has no 'cik' column; skipping CIK-primary "
+            "merge path and relying on ticker fallback only."
+        )
+        merged = universe_df.copy()
+        for col in keep.values():
+            merged[col] = pd.NA
+    else:
+        cstat = compustat_df[["cik"] + list(keep.keys())].rename(columns=keep).copy()
+        # Drop rows where CIK is null (can't match on CIK alone)
+        cstat_with_cik = cstat.dropna(subset=["cik"]).drop_duplicates(subset="cik", keep="first")
+        merged = universe_df.merge(cstat_with_cik, on="cik", how="left")
 
     # Ticker-based fallback for unmatched rows
     unmatched_mask = merged["cstat_gvkey"].isna()
