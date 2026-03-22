@@ -79,7 +79,7 @@ def _summary(aligned_df) -> None:
     logger.info("  Unique CIKs            : %d", aligned_df["cik"].nunique())
     logger.info("  Unique tickers         : %d", aligned_df["ticker"].nunique())
     logger.info(
-        "  Date range             : %s → %s",
+        "  Date range             : %s -> %s",
         pd.to_datetime(aligned_df["filing_date"]).min().date(),
         pd.to_datetime(aligned_df["filing_date"]).max().date(),
     )
@@ -148,7 +148,7 @@ def main() -> None:
     universe_path = raw_dir / "company_universe.parquet"
 
     pipeline_start = time.time()
-    logger.info("▶ Market data pipeline starting  (log → %s)", LOG_FILE)
+    logger.info(">> Market data pipeline starting  (log -> %s)", LOG_FILE)
 
     # ── Step 1: Company universe ─────────────────────────────────────────────
     if universe_path.exists() and args.skip_universe:
@@ -288,10 +288,10 @@ def main() -> None:
     # ── Output ───────────────────────────────────────────────────────────────
     out_path = cache_dir / "market_aligned.parquet"
     aligned_df.to_parquet(out_path, index=False)
-    logger.info("Output written → %s", out_path)
+    logger.info("Output written -> %s", out_path)
 
     _summary(aligned_df)
-    logger.info("▶ Pipeline complete in %s", _elapsed(pipeline_start))
+    logger.info(">> Pipeline complete in %s", _elapsed(pipeline_start))
 
 
 if __name__ == "__main__":
