@@ -11,9 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from fin_jepa.data.xbrl_pipeline import (
-    build_xbrl_dataset,
     load_xbrl_features as _load_parquet,
-    XBRLConfig,
 )
 
 

@@ -166,7 +166,7 @@ XBRL_FEATURE_SCHEMA: dict[str, list[str] | dict] = {
     ],
 }
 
-# Ordered list of canonical feature names (excluding computed ones for simple lookup)
+# Ordered list of canonical feature names (including computed features like total_debt)
 FEATURE_NAMES = list(XBRL_FEATURE_SCHEMA.keys())
 
 
@@ -224,7 +224,6 @@ def _resolve_simple_feature(
     us_gaap: dict,
     tags: list[str],
     fy: int,
-    annual_entries: dict[int, dict],
 ) -> float | None:
     """Resolve a simple (non-computed) feature for a given fiscal year.
 
@@ -235,7 +234,6 @@ def _resolve_simple_feature(
         us_gaap: The ``facts.us-gaap`` dict from Company Facts JSON.
         tags: Ordered list of XBRL concept names to try.
         fy: Fiscal year to extract.
-        annual_entries: Pre-filtered entries keyed by fiscal year (used by caller).
 
     Returns:
         The value as a float, or None if no tag yields data for this year.
@@ -282,7 +280,7 @@ def _resolve_computed_feature(
     any_found = False
 
     for component_tags in spec["components"]:
-        val = _resolve_simple_feature(us_gaap, component_tags, fy, {})
+        val = _resolve_simple_feature(us_gaap, component_tags, fy)
         if val is not None:
             total += val
             any_found = True
@@ -324,16 +322,22 @@ def extract_annual_facts(
     start_year = config.start_year if config else 2012
     end_year = config.end_year if config else 2024
 
-    # Discover all fiscal years present in the data by scanning a common concept
+    # Discover fiscal years by scanning a small set of monetary probe concepts
+    # (USD only) referenced in XBRL_FEATURE_SCHEMA.  This avoids iterating
+    # every concept/unit in the payload and prevents phantom years from
+    # non-monetary tags (e.g. shares) that don't map to any canonical feature.
+    _PROBE_TAGS = ["Assets", "Revenues", "NetIncomeLoss", "Liabilities",
+                   "StockholdersEquity", "AssetsCurrent"]
     all_fiscal_years: set[int] = set()
-    for concept_name, concept_data in us_gaap.items():
-        units = concept_data.get("units", {})
-        for unit_entries in units.values():
-            for entry in unit_entries:
-                if entry.get("form") == "10-K" and entry.get("fp") == "FY":
-                    fy = entry.get("fy")
-                    if isinstance(fy, int) and start_year <= fy <= end_year:
-                        all_fiscal_years.add(fy)
+    for probe_tag in _PROBE_TAGS:
+        concept_data = us_gaap.get(probe_tag)
+        if concept_data is None:
+            continue
+        for entry in concept_data.get("units", {}).get("USD", []):
+            if entry.get("form") == "10-K" and entry.get("fp") == "FY":
+                fy = entry.get("fy")
+                if isinstance(fy, int) and start_year <= fy <= end_year:
+                    all_fiscal_years.add(fy)
 
     if not all_fiscal_years:
         return pd.DataFrame()
@@ -374,7 +378,7 @@ def extract_annual_facts(
         # Resolve each feature
         for feature_name, spec in XBRL_FEATURE_SCHEMA.items():
             if isinstance(spec, list):
-                row[feature_name] = _resolve_simple_feature(us_gaap, spec, fy, {})
+                row[feature_name] = _resolve_simple_feature(us_gaap, spec, fy)
             elif isinstance(spec, dict):
                 row[feature_name] = _resolve_computed_feature(us_gaap, spec, fy)
             else:
