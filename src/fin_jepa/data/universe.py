@@ -49,10 +49,10 @@ is_current_filer     bool    filed a 10-K in the final two years of the window
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -200,12 +200,30 @@ def _fetch(url: str, session, *, as_json: bool = False, retries: int = 3, backof
 # EDGAR form.idx parsing
 # ---------------------------------------------------------------------------
 
+_EDGAR_IDX_EMPTY = pd.DataFrame(
+    columns=["form_type", "company_name", "cik", "date_filed", "filename"]
+)
+
+# Real EDGAR form.idx: form_type is 12 chars, company_name is 62 chars.
+# CIK, Date Filed, and File Name follow — but the CIK field is 17 chars
+# wide (right-aligned) so the Date Filed column STARTS at position 91,
+# not at position 86 where the header label "Date Filed" appears.
+# Using a regex for the trailing fields avoids this label-vs-data misalignment.
+_EDGAR_IDX_ROW_RE = re.compile(
+    r"^(?P<form_type>.{12})(?P<company_name>.{62})\s*"
+    r"(?P<cik>\d+)\s+(?P<date_filed>\d{4}-\d{2}-\d{2})\s+(?P<filename>\S+)"
+)
+
+
 def _parse_form_idx(content: str) -> pd.DataFrame:
     """Parse a raw EDGAR ``form.idx`` fixed-width text file.
 
-    The file has a two-line header followed by a separator line and then
-    data.  Column boundaries are inferred from the header so the parser
-    is robust to minor formatting variation across quarters.
+    Locates the header line, skips the preamble and separator, then
+    applies a regex to each data line.  Using a regex for the CIK /
+    date / filename fields is necessary because the CIK field in real
+    EDGAR files is 17 chars wide (right-aligned) rather than the 12
+    chars suggested by the header label positions, which would cause
+    ``pd.read_fwf`` with header-derived colspecs to truncate the date.
 
     Args:
         content: Raw text content of a ``form.idx`` file.
@@ -216,52 +234,40 @@ def _parse_form_idx(content: str) -> pd.DataFrame:
     """
     lines = content.splitlines()
     if len(lines) < 3:
-        return pd.DataFrame(columns=["form_type", "company_name", "cik", "date_filed", "filename"])
+        return _EDGAR_IDX_EMPTY.copy()
 
-    # Find the header line (contains "Form Type")
-    header_idx = 0
-    for i, line in enumerate(lines[:5]):
+    # Find the header line (contains "Form Type" and "CIK").
+    # Real EDGAR files have a multi-line preamble before the column header.
+    header_idx = None
+    for i, line in enumerate(lines):
         if "Form Type" in line and "CIK" in line:
             header_idx = i
             break
-
-    header = lines[header_idx]
-    # Determine column start positions from header text
-    col_starts = {
-        "form_type": 0,
-        "company_name": header.index("Company Name"),
-        "cik": header.index("CIK"),
-        "date_filed": header.index("Date Filed"),
-        "filename": header.index("Filename"),
-    }
-    # Build colspecs for pd.read_fwf
-    keys = list(col_starts.keys())
-    positions = list(col_starts.values())
-    colspecs = [
-        (positions[i], positions[i + 1])
-        for i in range(len(positions) - 1)
-    ] + [(positions[-1], None)]
+    if header_idx is None:
+        return _EDGAR_IDX_EMPTY.copy()
 
     data_lines = [
         line for line in lines[header_idx + 2:]  # skip header + separator
         if line.strip() and not line.startswith("---")
     ]
     if not data_lines:
-        return pd.DataFrame(columns=keys)
+        return _EDGAR_IDX_EMPTY.copy()
 
-    raw = "\n".join(data_lines)
-    df = pd.read_fwf(
-        io.StringIO(raw),
-        colspecs=colspecs,
-        names=keys,
-        dtype=str,
-    )
-    df = df.dropna(subset=["cik", "date_filed"])
+    records = []
+    for line in data_lines:
+        m = _EDGAR_IDX_ROW_RE.match(line)
+        if m:
+            records.append(m.groupdict())
+
+    if not records:
+        return _EDGAR_IDX_EMPTY.copy()
+
+    df = pd.DataFrame(records)
     df["cik"] = df["cik"].str.strip().str.zfill(10)
     df["form_type"] = df["form_type"].str.strip()
     df["company_name"] = df["company_name"].str.strip()
-    df["date_filed"] = pd.to_datetime(df["date_filed"].str.strip(), format="%Y-%m-%d", errors="coerce")
-    df = df.dropna(subset=["date_filed"])
+    df["date_filed"] = pd.to_datetime(df["date_filed"], format="%Y-%m-%d", errors="coerce")
+    df = df.dropna(subset=["cik", "date_filed"])
     return df.reset_index(drop=True)
 
 
