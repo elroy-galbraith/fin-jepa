@@ -117,7 +117,19 @@ def load_compustat_crossref(path: Path | str) -> pd.DataFrame:
             .str.zfill(10)
         )
     if "sic" in df.columns:
-        df["sic"] = df["sic"].astype(str).str.strip().str.zfill(4)
+        # Guard against NaN→"nan" corruption on zero-padding, same as CIK (C3).
+        _sic_str = df["sic"].astype(str).str.strip()
+        df["sic"] = (
+            df["sic"]
+            .where(
+                df["sic"].notna()
+                & (_sic_str != "")
+                & (_sic_str.str.lower() != "nan")
+            )
+            .astype("string")
+            .str.strip()
+            .str.zfill(4)
+        )
 
     # Parse date columns
     for date_col in ("ipodate", "dldte"):
@@ -204,7 +216,10 @@ def merge_compustat(
             .dropna(subset=["ticker"])
             .drop_duplicates(subset="ticker", keep="first")
         )
-        fallback = universe_df[unmatched_mask][["cik", "ticker"]].merge(
+        # Use merged (not universe_df) so the boolean mask aligns on the
+        # same index that produced it; universe_df may have a different
+        # index layout after the left-merge or copy above.
+        fallback = merged.loc[unmatched_mask, ["cik", "ticker"]].merge(
             cstat_by_ticker, on="ticker", how="left"
         ).set_index("cik")
         for col in keep.values():

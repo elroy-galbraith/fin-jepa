@@ -149,12 +149,17 @@ def _build_sic_table() -> dict[int, str]:
             table[sic] = sector
 
     if overrides:
+        # Warn once at WARNING level with the count; full details at DEBUG
+        # to avoid spamming logs on every import (the overlaps are all
+        # intentional — narrower sub-ranges overriding enclosing ones).
         _log.warning(
             "sector_map: %d intentional SIC override(s) detected "
-            "(later _FF12_RANGES entry wins):\n%s",
+            "(later _FF12_RANGES entry wins); set log level to DEBUG on "
+            "'%s' to see the full list.",
             len(overrides),
-            "\n".join(overrides),
+            __name__,
         )
+        _log.debug("sector_map: SIC override details:\n%s", "\n".join(overrides))
 
     return table
 

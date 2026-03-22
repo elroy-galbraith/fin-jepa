@@ -6,9 +6,7 @@ mocked using unittest.mock.patch so the test suite runs offline.
 
 from __future__ import annotations
 
-import json
 import tempfile
-from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -213,7 +211,7 @@ class TestAuditXbrlCoverage:
 # ---------------------------------------------------------------------------
 # build_company_universe integration test (mocked HTTP)
 # ---------------------------------------------------------------------------
-from fin_jepa.data.universe import UniverseConfig, build_company_universe
+from fin_jepa.data.universe import build_company_universe
 
 
 MOCK_TICKERS_RESPONSE = {

@@ -43,7 +43,7 @@ n_10k_filings        int     number of 10-K filings (excl. 10-K/A amendments)
 n_xbrl_filings       int     10-K filings estimated to include XBRL (≥2012)
 xbrl_coverage_pct    float   n_xbrl_filings / n_10k_filings
 filing_years         list    sorted list of calendar years with a 10-K filing
-gap_years            list    years in [start_year, last_10k_year] missing a 10-K
+gap_years            list    years in [first_10k_year, last_10k_year] with no 10-K filing
 is_current_filer     bool    filed a 10-K in the final two years of the window
 """
 
@@ -121,13 +121,26 @@ class UniverseConfig:
         default_factory=lambda: os.environ.get("EDGAR_USER_AGENT", _DEFAULT_USER_AGENT)
     )
 
+    def __post_init__(self) -> None:
+        if self.rate_limit_per_sec <= 0:
+            raise ValueError(
+                f"rate_limit_per_sec must be > 0, got {self.rate_limit_per_sec}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Internal HTTP helpers
 # ---------------------------------------------------------------------------
 
-def _get_session():
+def _get_session(user_agent: str | None = None):
     """Create a requests.Session with EDGAR-compliant headers.
+
+    Args:
+        user_agent: Explicit ``User-Agent`` string.  Falls back to the
+            ``EDGAR_USER_AGENT`` env var, then the built-in placeholder.
+            Pass ``config.user_agent`` so programmatic overrides via
+            :class:`UniverseConfig` take effect (addresses the gap where
+            the config value was silently ignored).
 
     .. note::
         Do NOT hard-code a ``Host`` header here.  The HTTP stack derives
@@ -141,9 +154,9 @@ def _get_session():
             "Install with: pip install requests"
         )
     session = _requests_module.Session()
-    # EDGAR requires a descriptive User-Agent per their fair-use policy
+    ua = user_agent or os.environ.get("EDGAR_USER_AGENT", _DEFAULT_USER_AGENT)
     session.headers.update({
-        "User-Agent": os.environ.get("EDGAR_USER_AGENT", _DEFAULT_USER_AGENT),
+        "User-Agent": ua,
         "Accept-Encoding": "gzip, deflate",
     })
     return session
@@ -170,6 +183,11 @@ def _fetch(url: str, session, *, as_json: bool = False, retries: int = 3, backof
             resp.raise_for_status()
             return resp.json() if as_json else resp.text
         except Exception as exc:
+            # Fail fast on deterministic client errors (4xx) except 429
+            # (Too Many Requests), which is transient by nature.
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if isinstance(status, int) and 400 <= status < 500 and status != 429:
+                raise
             if attempt == retries - 1:
                 raise
             wait = backoff ** attempt
@@ -478,9 +496,21 @@ def fetch_all_submissions(
     min_sleep = 1.0 / config.rate_limit_per_sec
     lock = threading.Lock()
     last_request_time: list[float] = [0.0]
+    # Thread-local storage so each worker thread reuses one Session,
+    # keeping TCP connection pools alive across CIK fetches (avoids
+    # creating a new Session — and new connections — per CIK).
+    _thread_local = threading.local()
+
+    def _get_thread_session():
+        """Lazily create one requests.Session per worker thread."""
+        session = getattr(_thread_local, "session", None)
+        if session is None:
+            session = _get_session(user_agent=config.user_agent)
+            _thread_local.session = session
+        return session
 
     def _throttled_fetch(cik: str) -> tuple[str, dict]:
-        session = _get_session()
+        session = _get_thread_session()
         # Enforce rate limit: compute the required sleep duration while
         # holding the lock, then release before sleeping so other threads
         # are not serialized waiting on the sleep itself (W2).
@@ -518,7 +548,10 @@ def fetch_all_submissions(
 # XBRL coverage audit
 # ---------------------------------------------------------------------------
 
-def audit_xbrl_coverage(filings_df: pd.DataFrame) -> pd.DataFrame:
+def audit_xbrl_coverage(
+    filings_df: pd.DataFrame,
+    end_year: int | None = None,
+) -> pd.DataFrame:
     """Estimate XBRL coverage for each company in the filing index.
 
     **Estimation approach**: all 10-K filings dated on or after
@@ -534,6 +567,14 @@ def audit_xbrl_coverage(filings_df: pd.DataFrame) -> pd.DataFrame:
     Args:
         filings_df: Output of :func:`build_filing_index` with at least
             columns ``cik``, ``form_type``, ``date_filed``.
+        end_year: Last year of the universe window (e.g. 2024).  Used to
+            determine ``is_current_filer``: True iff the company filed a
+            10-K in ``{end_year, end_year - 1}``.  When omitted, defaults
+            to the maximum ``filing_year`` present in *filings_df*; note
+            that in that case ``is_current_filer`` will be ``True`` for
+            every company that filed at all (since ``last_10k_year`` is
+            always in ``filing_years``), so callers should always supply
+            this value.
 
     Returns:
         DataFrame indexed by cik with columns:
@@ -581,12 +622,19 @@ def audit_xbrl_coverage(filings_df: pd.DataFrame) -> pd.DataFrame:
             if years else []
         )
     )
-    agg["is_current_filer"] = agg.apply(
-        lambda row: bool(
-            set(row["filing_years"])
-            & {row["last_10k_date"].year, row["last_10k_date"].year - 1}
-        ),
-        axis=1,
+    # is_current_filer: True iff the company filed in the final two years
+    # of the universe window.  Use the supplied end_year; if not given,
+    # fall back to the maximum year in the dataset.  Note: using
+    # last_10k_date.year here would make is_current_filer always True
+    # (every company's last year is by definition in filing_years).
+    _end_year: int = (
+        end_year
+        if end_year is not None
+        else int(filings_10k["filing_year"].max())
+    )
+    final_two = {_end_year, _end_year - 1}
+    agg["is_current_filer"] = agg["filing_years"].apply(
+        lambda years: bool(set(years) & final_two)
     )
     return agg
 
@@ -657,14 +705,14 @@ def build_company_universe(
 
     # ── Step 1: Filing index ─────────────────────────────────────────────────
     logger.info("Building filing index for %d–%d …", start_year, end_year)
-    session = _get_session()
+    session = _get_session(user_agent=config.user_agent)
     filings_df = build_filing_index(cache_dir, config, session)
     n_total_filings = len(filings_df)
     logger.info("  %d total 10-K/10-K/A filings found", n_total_filings)
 
     # ── Step 2: XBRL coverage audit ──────────────────────────────────────────
     logger.info("Running XBRL coverage audit …")
-    coverage_df = audit_xbrl_coverage(filings_df)
+    coverage_df = audit_xbrl_coverage(filings_df, end_year=config.end_year)
 
     # Apply min_filings filter
     coverage_df = coverage_df[coverage_df["n_10k_filings"] >= config.min_filings]
