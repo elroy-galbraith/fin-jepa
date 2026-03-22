@@ -97,8 +97,9 @@ class UniverseConfig:
     Attributes:
         start_year: First calendar year of 10-K filings to include.
         end_year: Last calendar year of 10-K filings to include.
-        form_types: EDGAR form types to include. 10-K/A (amendments) are
-            counted separately for the XBRL audit but not in n_10k_filings.
+        form_types: EDGAR form types to include. 10-K/A amendments are
+            fetched and stored but are excluded from the XBRL coverage audit,
+            which considers only primary 10-K filings.
         min_filings: Minimum number of distinct 10-K filings required for
             a company to be included in the universe.
         fetch_submissions: Whether to call the EDGAR submissions API per-CIK
@@ -306,7 +307,7 @@ def fetch_quarterly_index(
     logger.debug("Fetching %s", url)
 
     if session is None:
-        session = _get_session()
+        session = _get_session(config.user_agent)
 
     content = _fetch(url, session)
     df = _parse_form_idx(content)
@@ -346,7 +347,7 @@ def build_filing_index(
         filename, plus derived ``filing_year`` (int).
     """
     if session is None:
-        session = _get_session()
+        session = _get_session(config.user_agent)
 
     quarters = [
         (y, q)
@@ -376,7 +377,11 @@ def build_filing_index(
 # Company tickers from EDGAR
 # ---------------------------------------------------------------------------
 
-def fetch_company_tickers(cache_dir: Path, session=None) -> pd.DataFrame:
+def fetch_company_tickers(
+    cache_dir: Path,
+    session=None,
+    user_agent: str | None = None,
+) -> pd.DataFrame:
     """Fetch the EDGAR company-tickers-exchange mapping.
 
     Source: ``https://www.sec.gov/files/company_tickers_exchange.json``
@@ -384,6 +389,9 @@ def fetch_company_tickers(cache_dir: Path, session=None) -> pd.DataFrame:
     Args:
         cache_dir: Root cache directory.
         session: Optional requests.Session.
+        user_agent: EDGAR ``User-Agent`` header value.  Falls back to
+            ``EDGAR_USER_AGENT`` env var, then the built-in placeholder.
+            Pass ``config.user_agent`` to honour the configured value.
 
     Returns:
         DataFrame with columns: cik (zero-padded 10-digit str), ticker,
@@ -397,7 +405,7 @@ def fetch_company_tickers(cache_dir: Path, session=None) -> pd.DataFrame:
     logger.debug("Fetching company tickers from %s", url)
 
     if session is None:
-        session = _get_session()
+        session = _get_session(user_agent)
 
     data = _fetch(url, session, as_json=True)
     fields = data.get("fields", ["cik", "name", "ticker", "exchange"])
@@ -736,7 +744,7 @@ def build_company_universe(
     # ── Step 4: Ticker / exchange ────────────────────────────────────────────
     logger.info("Fetching company ticker/exchange mapping …")
     time.sleep(1.0 / config.rate_limit_per_sec)
-    tickers_df = fetch_company_tickers(cache_dir, session)
+    tickers_df = fetch_company_tickers(cache_dir, session, user_agent=config.user_agent)
     tickers_df = tickers_df.set_index("cik")[["ticker", "exchange"]]
     universe = universe.join(tickers_df, how="left")
 
