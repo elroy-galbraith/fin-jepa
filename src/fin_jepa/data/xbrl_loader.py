@@ -1,13 +1,7 @@
-"""
-XBRL data ingestion from SEC EDGAR.
+"""XBRL data ingestion from SEC EDGAR.
 
-Workstream: Collect and align XBRL financial statement data.
-
-TODO:
-  - Download 10-K/10-Q XBRL filings via EDGAR bulk data or sec-edgar-downloader
-  - Parse instance documents into a flat feature table (one row per filing)
-  - Standardize concept names across reporting periods and taxonomies
-  - Align filing dates with fiscal period end dates
+Thin wrapper around :mod:`fin_jepa.data.xbrl_pipeline` that provides a
+simple ``load_xbrl_features(raw_dir)`` interface for downstream consumers.
 """
 
 from __future__ import annotations
@@ -16,10 +10,27 @@ from pathlib import Path
 
 import pandas as pd
 
+from fin_jepa.data.xbrl_pipeline import (
+    load_xbrl_features as _load_parquet,
+)
+
 
 def load_xbrl_features(raw_dir: Path) -> pd.DataFrame:
-    """Load and concatenate raw XBRL feature parquet files from *raw_dir*.
+    """Load XBRL feature data from *raw_dir*.
 
-    Returns a DataFrame with columns: [cik, ticker, period_end, *xbrl_features].
+    Looks for ``raw_dir/xbrl_features.parquet``.  If the file does not
+    exist, raises FileNotFoundError — run the extraction pipeline first
+    via :func:`fin_jepa.data.xbrl_pipeline.build_xbrl_dataset`.
+
+    Returns a DataFrame with columns: [cik, ticker, period_end, fiscal_year,
+    filed_date, *xbrl_features].
     """
-    raise NotImplementedError("Implement XBRL ingestion pipeline.")
+    parquet_path = Path(raw_dir) / "xbrl_features.parquet"
+    if not parquet_path.exists():
+        raise FileNotFoundError(
+            f"XBRL features not found at {parquet_path}. "
+            "Run the extraction pipeline first: "
+            "fin_jepa.data.xbrl_pipeline.build_xbrl_dataset()"
+        )
+    df, _provenance = _load_parquet(parquet_path)
+    return df
