@@ -61,6 +61,30 @@ logistic_regression:
   C: 1.0
   max_iter: 1000
 
+gbt:
+  max_iter: 500
+  learning_rate: 0.05
+  max_depth: 6
+  min_samples_leaf: 20
+
+baselines:
+  tune: false              # set true to run Optuna temporal CV tuning
+  n_trials: 30
+  n_cv_splits: 3
+  xgboost_search:
+    n_estimators: {type: int, low: 100, high: 1000}
+    learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
+    max_depth: {type: int, low: 3, high: 10}
+    subsample: {type: float, low: 0.5, high: 1.0}
+    colsample_bytree: {type: float, low: 0.5, high: 1.0}
+  gbt_search:
+    max_iter: {type: int, low: 100, high: 1000}
+    learning_rate: {type: float, low: 0.01, high: 0.3, log: true}
+    max_depth: {type: int, low: 3, high: 10}
+    min_samples_leaf: {type: int, low: 10, high: 50}
+  lr_search:
+    C: {type: float, low: 0.001, high: 100.0, log: true}
+
 training:
   batch_size: 256
   epochs: 100

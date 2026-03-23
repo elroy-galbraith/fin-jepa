@@ -38,14 +38,30 @@ logger = logging.getLogger(__name__)
 
 RATIO_FEATURES = [
     "debt_to_equity",
+    "debt_to_assets",
     "current_ratio",
     "quick_ratio",
     "roa",
     "roe",
     "gross_margin",
     "operating_margin",
+    "net_profit_margin",
     "interest_coverage",
     "altman_z_score",
+    "cfo_to_debt",
+]
+
+TRADITIONAL_RATIO_FEATURES = [
+    "altman_z_score",
+    "current_ratio",
+    "quick_ratio",
+    "debt_to_equity",
+    "debt_to_assets",
+    "roa",
+    "roe",
+    "net_profit_margin",
+    "interest_coverage",
+    "cfo_to_debt",
 ]
 
 YOY_BASE_FEATURES = [
@@ -104,20 +120,23 @@ def _col_or_nan(df: pd.DataFrame, col: str) -> pd.Series:
 def compute_ratios(df: pd.DataFrame) -> pd.DataFrame:
     """Derive financial ratio features from raw XBRL columns.
 
-    Appends 9 ratio columns to *df* (returns a copy). If a required input
+    Appends 12 ratio columns to *df* (returns a copy). If a required input
     column is absent or contains NaN, the corresponding ratio is NaN for
     those rows.
 
     Ratios computed:
-      1. debt_to_equity         = total_debt / total_equity
-      2. current_ratio          = current_assets / current_liabilities
-      3. quick_ratio            = cash_equivalents / current_liabilities
-      4. roa                    = net_income / total_assets
-      5. roe                    = net_income / total_equity
-      6. gross_margin           = (total_revenue - cost_of_sales) / total_revenue
-      7. operating_margin       = operating_income / total_revenue
-      8. interest_coverage      = operating_income / interest_expense
-      9. altman_z_score         = Altman (1968) 5-component Z-score
+      1.  debt_to_equity        = total_debt / total_equity
+      2.  debt_to_assets        = total_debt / total_assets
+      3.  current_ratio         = current_assets / current_liabilities
+      4.  quick_ratio           = cash_equivalents / current_liabilities
+      5.  roa                   = net_income / total_assets
+      6.  roe                   = net_income / total_equity
+      7.  gross_margin          = (total_revenue - cost_of_sales) / total_revenue
+      8.  operating_margin      = operating_income / total_revenue
+      9.  net_profit_margin     = net_income / total_revenue
+      10. interest_coverage     = operating_income / interest_expense
+      11. altman_z_score        = Altman (1968) 5-component Z-score
+      12. cfo_to_debt           = cash_from_operations / total_debt
     """
     out = df.copy()
 
@@ -134,14 +153,17 @@ def compute_ratios(df: pd.DataFrame) -> pd.DataFrame:
     operating_income = _col_or_nan(out, "operating_income")
     net_income = _col_or_nan(out, "net_income")
     interest_expense = _col_or_nan(out, "interest_expense")
+    cash_from_operations = _col_or_nan(out, "cash_from_operations")
 
     out["debt_to_equity"] = _safe_div(total_debt, total_equity)
+    out["debt_to_assets"] = _safe_div(total_debt, total_assets)
     out["current_ratio"] = _safe_div(current_assets, current_liabilities)
     out["quick_ratio"] = _safe_div(cash_equivalents, current_liabilities)
     out["roa"] = _safe_div(net_income, total_assets)
     out["roe"] = _safe_div(net_income, total_equity)
     out["gross_margin"] = _safe_div(total_revenue - cost_of_sales, total_revenue)
     out["operating_margin"] = _safe_div(operating_income, total_revenue)
+    out["net_profit_margin"] = _safe_div(net_income, total_revenue)
     out["interest_coverage"] = _safe_div(operating_income, interest_expense)
 
     # Altman Z-score: Z = 1.2*X1 + 1.4*X2 + 3.3*X3 + 0.6*X4 + 1.0*X5
@@ -152,6 +174,8 @@ def compute_ratios(df: pd.DataFrame) -> pd.DataFrame:
     x4 = _safe_div(total_equity, total_liabilities)
     x5 = _safe_div(total_revenue, total_assets)
     out["altman_z_score"] = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
+
+    out["cfo_to_debt"] = _safe_div(cash_from_operations, total_debt)
 
     return out
 
