@@ -1,5 +1,5 @@
 """
-Baseline models: XGBoost and Logistic Regression wrappers.
+Baseline models: XGBoost, Logistic Regression, and GBT wrappers.
 
 Workstream: Run FT-Transformer vs. baselines benchmark.
 
@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -59,5 +60,30 @@ def build_xgboost(
         random_state=random_state,
         eval_metric="auc",
         use_label_encoder=False,
+        **kwargs,
+    )
+
+
+def build_gbt(
+    max_iter: int = 500,
+    learning_rate: float = 0.05,
+    max_depth: int | None = 6,
+    min_samples_leaf: int = 20,
+    random_state: int = 42,
+    class_weight: str = "balanced",
+    **kwargs: Any,
+) -> HistGradientBoostingClassifier:
+    """Return a configured HistGradientBoostingClassifier.
+
+    Uses sklearn's histogram-based GBT which natively handles NaN,
+    making it suitable for raw XBRL features with minimal preprocessing.
+    """
+    return HistGradientBoostingClassifier(
+        max_iter=max_iter,
+        learning_rate=learning_rate,
+        max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
+        random_state=random_state,
+        class_weight=class_weight,
         **kwargs,
     )

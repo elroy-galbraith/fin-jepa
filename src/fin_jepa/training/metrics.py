@@ -10,13 +10,59 @@ by AUROC margin >= 0.01 on the held-out test set.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
+from sklearn.calibration import calibration_curve
 from sklearn.metrics import (
     average_precision_score,
     brier_score_loss,
     f1_score,
     roc_auc_score,
 )
+
+
+def compute_calibration(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    n_bins: int = 10,
+) -> dict[str, Any]:
+    """Compute calibration curve data and expected calibration error (ECE).
+
+    Returns
+    -------
+    dict with keys:
+        ece        : float — expected calibration error (lower is better)
+        prob_true  : list[float] — fraction of positives per bin
+        prob_pred  : list[float] — mean predicted probability per bin
+        n_bins     : int — number of bins requested
+    """
+    prob_true, prob_pred = calibration_curve(
+        y_true, y_score, n_bins=n_bins, strategy="uniform",
+    )
+
+    # ECE: weighted average of |prob_true - prob_pred| across non-empty bins.
+    # calibration_curve only returns non-empty bins, so we compute bin counts
+    # to weight properly.
+    bin_edges = np.linspace(0, 1, n_bins + 1)
+    bin_indices = np.digitize(y_score, bin_edges[1:-1])
+    bin_counts = np.array([
+        np.sum(bin_indices == i) for i in range(n_bins)
+    ])
+    nonempty = bin_counts > 0
+    nonempty_counts = bin_counts[nonempty]
+    n_samples = len(y_true)
+
+    ece = float(
+        np.sum(nonempty_counts * np.abs(prob_true - prob_pred)) / n_samples
+    )
+
+    return {
+        "ece": ece,
+        "prob_true": prob_true.tolist(),
+        "prob_pred": prob_pred.tolist(),
+        "n_bins": n_bins,
+    }
 
 
 def compute_all_metrics(y_true: np.ndarray, y_score: np.ndarray) -> dict[str, float]:
@@ -33,12 +79,16 @@ def compute_all_metrics(y_true: np.ndarray, y_score: np.ndarray) -> dict[str, fl
     y_pred = (y_score >= best_thresh).astype(int)
     f1 = f1_score(y_true, y_pred, zero_division=0)
 
+    cal = compute_calibration(y_true, y_score)
+
     return {
         "auroc": float(auroc),
         "auprc": float(auprc),
         "brier": float(brier),
         "f1_youden": float(f1),
         "youden_threshold": best_thresh,
+        "ece": cal["ece"],
+        "calibration": cal,
     }
 
 

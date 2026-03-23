@@ -15,21 +15,31 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from sklearn.metrics import roc_auc_score
+
 from fin_jepa.data.feature_engineering import (
+    TRADITIONAL_RATIO_FEATURES,
     FeatureConfig,
+    RAW_FEATURES,
     build_feature_matrix,
 )
 from fin_jepa.data.labels import load_label_database
 from fin_jepa.data.splits import SplitConfig
 from fin_jepa.data.xbrl_loader import load_xbrl_features
-from fin_jepa.models.baselines import build_logistic_regression, build_xgboost
+from fin_jepa.models.baselines import (
+    build_gbt,
+    build_logistic_regression,
+    build_xgboost,
+)
 from fin_jepa.models.ft_transformer import FTTransformer
 from fin_jepa.training.dataset import make_dataloader
 from fin_jepa.training.metrics import compute_all_metrics, go_no_go_gate
+from fin_jepa.training.temporal_cv import TemporalCV
 from fin_jepa.utils.reproducibility import seed_everything
 
 log = logging.getLogger(__name__)
@@ -154,6 +164,103 @@ def _predict_scores(
     return np.concatenate(all_labels), np.concatenate(all_scores)
 
 
+# ── Optuna-based baseline tuning ─────────────────────────────────────────
+
+
+def tune_baseline(
+    model_name: str,
+    build_fn: callable,
+    search_space: dict,
+    X_train_df: pd.DataFrame,
+    y_train: np.ndarray,
+    feature_cols: list[str],
+    n_splits: int = 3,
+    n_trials: int = 30,
+    seed: int = 42,
+) -> dict:
+    """Tune a baseline model using temporal CV and Optuna.
+
+    Parameters
+    ----------
+    model_name : str
+        Label for logging (e.g. ``"xgboost"``).
+    build_fn : callable
+        Factory that accepts ``**params`` and returns an sklearn-compatible
+        classifier.
+    search_space : dict
+        Maps parameter names to dicts with keys ``type``, ``low``, ``high``,
+        and optionally ``log``.
+    X_train_df : DataFrame
+        Training data with ``fiscal_year`` column for temporal splitting
+        and the feature columns.
+    y_train : ndarray
+        Binary labels aligned with *X_train_df*.
+    feature_cols : list[str]
+        Columns in *X_train_df* to use as features.
+    n_splits : int
+        Number of temporal CV folds.
+    n_trials : int
+        Number of Optuna trials.
+    seed : int
+        Random seed for the Optuna sampler.
+
+    Returns
+    -------
+    dict with ``best_params`` and ``mean_val_auroc``.
+    """
+    import optuna
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    cv = TemporalCV(n_splits=n_splits)
+
+    def objective(trial: optuna.Trial) -> float:
+        params: dict = {}
+        for name, spec in search_space.items():
+            if spec["type"] == "float":
+                params[name] = trial.suggest_float(
+                    name, spec["low"], spec["high"], log=spec.get("log", False),
+                )
+            elif spec["type"] == "int":
+                params[name] = trial.suggest_int(name, spec["low"], spec["high"])
+
+        aurocs: list[float] = []
+        for train_idx, val_idx in cv.split(X_train_df):
+            X_tr = X_train_df.iloc[train_idx][feature_cols].to_numpy(dtype=np.float32)
+            y_tr = y_train[train_idx]
+            X_va = X_train_df.iloc[val_idx][feature_cols].to_numpy(dtype=np.float32)
+            y_va = y_train[val_idx]
+
+            X_tr = np.nan_to_num(X_tr, nan=0.0)
+            X_va = np.nan_to_num(X_va, nan=0.0)
+
+            model = build_fn(**params)
+            model.fit(X_tr, y_tr)
+            scores = model.predict_proba(X_va)[:, 1]
+
+            if len(np.unique(y_va)) < 2:
+                continue
+            aurocs.append(float(roc_auc_score(y_va, scores)))
+
+        return float(np.mean(aurocs)) if aurocs else 0.0
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=seed),
+    )
+    study.optimize(objective, n_trials=n_trials)
+
+    log.info(
+        "  %s tuning — best val AUROC: %.4f  params: %s",
+        model_name, study.best_value, study.best_params,
+    )
+
+    return {
+        "best_params": study.best_params,
+        "mean_val_auroc": study.best_value,
+    }
+
+
 # ── Main benchmark entry point ───────────────────────────────────────────
 
 
@@ -207,10 +314,26 @@ def run_benchmark(config) -> dict:
         "sec_enforcement", "bankruptcy",
     ])
 
+    # ── Feature subsets for distinct baselines ──────────────────────
+    # Traditional ratios for LR "interpretable floor"
+    trad_feature_cols = [c for c in TRADITIONAL_RATIO_FEATURES if c in feature_cols]
+    log.info("Traditional ratio features: %d/%d available", len(trad_feature_cols), len(TRADITIONAL_RATIO_FEATURES))
+
+    # Raw XBRL features only (no ratios, no YoY) for GBT baseline
+    raw_feature_cols = [c for c in feature_cols if c in RAW_FEATURES]
+    log.info("Raw XBRL features: %d available", len(raw_feature_cols))
+
+    # Baseline tuning config
+    do_tune = bool(_cfg(config, "baselines.tune", False))
+    n_trials = int(_cfg(config, "baselines.n_trials", 30))
+    n_cv_splits = int(_cfg(config, "baselines.n_cv_splits", 3))
+
     # ── Per-outcome training loop ────────────────────────────────────
     ft_results: dict[str, dict] = {}
     xgb_results: dict[str, dict] = {}
     lr_results: dict[str, dict] = {}
+    lr_trad_results: dict[str, dict] = {}
+    gbt_results: dict[str, dict] = {}
     all_results: dict[str, dict] = {}
 
     batch_size = int(_cfg(config, "training.batch_size", 256))
@@ -261,13 +384,46 @@ def run_benchmark(config) -> dict:
         X_test = np.nan_to_num(X_test, nan=0.0)
 
         # ── Baselines ───────────────────────────────────────────────
-        # XGBoost
+
+        # --- Optional Optuna tuning ---
+        xgb_params: dict = {}
+        gbt_params: dict = {}
+        lr_params: dict = {}
+        if do_tune:
+            xgb_search = _cfg(config, "baselines.xgboost_search", {})
+            if xgb_search:
+                tune_result = tune_baseline(
+                    "xgboost", build_xgboost, dict(xgb_search),
+                    train_valid, y_train, feature_cols,
+                    n_splits=n_cv_splits, n_trials=n_trials, seed=seed,
+                )
+                xgb_params = tune_result["best_params"]
+
+            gbt_search = _cfg(config, "baselines.gbt_search", {})
+            if gbt_search:
+                tune_result = tune_baseline(
+                    "gbt", build_gbt, dict(gbt_search),
+                    train_valid, y_train, raw_feature_cols,
+                    n_splits=n_cv_splits, n_trials=n_trials, seed=seed,
+                )
+                gbt_params = tune_result["best_params"]
+
+            lr_search = _cfg(config, "baselines.lr_search", {})
+            if lr_search:
+                tune_result = tune_baseline(
+                    "lr", build_logistic_regression, dict(lr_search),
+                    train_valid, y_train, trad_feature_cols,
+                    n_splits=n_cv_splits, n_trials=n_trials, seed=seed,
+                )
+                lr_params = tune_result["best_params"]
+
+        # --- XGBoost on full XBRL features (primary benchmark) ---
         xgb_model = build_xgboost(
-            n_estimators=int(_cfg(config, "xgboost.n_estimators", 500)),
-            learning_rate=float(_cfg(config, "xgboost.learning_rate", 0.05)),
-            max_depth=int(_cfg(config, "xgboost.max_depth", 6)),
-            subsample=float(_cfg(config, "xgboost.subsample", 0.8)),
-            colsample_bytree=float(_cfg(config, "xgboost.colsample_bytree", 0.8)),
+            n_estimators=int(xgb_params.get("n_estimators", _cfg(config, "xgboost.n_estimators", 500))),
+            learning_rate=float(xgb_params.get("learning_rate", _cfg(config, "xgboost.learning_rate", 0.05))),
+            max_depth=int(xgb_params.get("max_depth", _cfg(config, "xgboost.max_depth", 6))),
+            subsample=float(xgb_params.get("subsample", _cfg(config, "xgboost.subsample", 0.8))),
+            colsample_bytree=float(xgb_params.get("colsample_bytree", _cfg(config, "xgboost.colsample_bytree", 0.8))),
             scale_pos_weight=pos_weight,
         )
         xgb_model.fit(X_train, y_train)
@@ -275,15 +431,54 @@ def run_benchmark(config) -> dict:
         xgb_metrics = compute_all_metrics(y_test, xgb_scores)
         log.info("  XGBoost   — AUROC: %.4f", xgb_metrics["auroc"])
 
-        # Logistic Regression
+        # --- Logistic Regression on full features ---
         lr_model = build_logistic_regression(
-            C=float(_cfg(config, "logistic_regression.C", 1.0)),
+            C=float(lr_params.get("C", _cfg(config, "logistic_regression.C", 1.0))),
             max_iter=int(_cfg(config, "logistic_regression.max_iter", 1000)),
         )
         lr_model.fit(X_train, y_train)
         lr_scores = lr_model.predict_proba(X_test)[:, 1]
         lr_metrics = compute_all_metrics(y_test, lr_scores)
-        log.info("  LogReg    — AUROC: %.4f", lr_metrics["auroc"])
+        log.info("  LR (full) — AUROC: %.4f", lr_metrics["auroc"])
+
+        # --- Logistic Regression on traditional ratios (interpretable floor) ---
+        if trad_feature_cols:
+            X_train_trad = train_valid[trad_feature_cols].to_numpy(dtype=np.float32)
+            X_test_trad = test_valid[trad_feature_cols].to_numpy(dtype=np.float32)
+            X_train_trad = np.nan_to_num(X_train_trad, nan=0.0)
+            X_test_trad = np.nan_to_num(X_test_trad, nan=0.0)
+
+            lr_trad_model = build_logistic_regression(
+                C=float(lr_params.get("C", _cfg(config, "logistic_regression.C", 1.0))),
+                max_iter=int(_cfg(config, "logistic_regression.max_iter", 1000)),
+            )
+            lr_trad_model.fit(X_train_trad, y_train)
+            lr_trad_scores = lr_trad_model.predict_proba(X_test_trad)[:, 1]
+            lr_trad_metrics = compute_all_metrics(y_test, lr_trad_scores)
+            log.info("  LR (trad) — AUROC: %.4f", lr_trad_metrics["auroc"])
+        else:
+            lr_trad_metrics = {}
+            log.warning("  No traditional ratio features available — skipping LR (trad).")
+
+        # --- GBT on raw XBRL features (minimal feature engineering) ---
+        if raw_feature_cols:
+            X_train_raw = train_valid[raw_feature_cols].to_numpy(dtype=np.float32)
+            X_test_raw = test_valid[raw_feature_cols].to_numpy(dtype=np.float32)
+            # HistGradientBoostingClassifier handles NaN natively — no imputation
+
+            gbt_model = build_gbt(
+                max_iter=int(gbt_params.get("max_iter", _cfg(config, "gbt.max_iter", 500))),
+                learning_rate=float(gbt_params.get("learning_rate", _cfg(config, "gbt.learning_rate", 0.05))),
+                max_depth=int(gbt_params.get("max_depth", _cfg(config, "gbt.max_depth", 6))),
+                min_samples_leaf=int(gbt_params.get("min_samples_leaf", _cfg(config, "gbt.min_samples_leaf", 20))),
+            )
+            gbt_model.fit(X_train_raw, y_train)
+            gbt_scores = gbt_model.predict_proba(X_test_raw)[:, 1]
+            gbt_metrics = compute_all_metrics(y_test, gbt_scores)
+            log.info("  GBT (raw) — AUROC: %.4f", gbt_metrics["auroc"])
+        else:
+            gbt_metrics = {}
+            log.warning("  No raw XBRL features available — skipping GBT.")
 
         # ── FT-Transformer ──────────────────────────────────────────
         train_loader = make_dataloader(
@@ -329,10 +524,14 @@ def run_benchmark(config) -> dict:
         ft_results[outcome] = ft_metrics
         xgb_results[outcome] = xgb_metrics
         lr_results[outcome] = lr_metrics
+        lr_trad_results[outcome] = lr_trad_metrics
+        gbt_results[outcome] = gbt_metrics
         all_results[outcome] = {
             "ft_transformer": ft_metrics,
             "xgboost": xgb_metrics,
-            "logistic_regression": lr_metrics,
+            "lr_full": lr_metrics,
+            "lr_traditional": lr_trad_metrics,
+            "gbt_raw": gbt_metrics,
         }
 
     # ── Go / No-Go gate ──────────────────────────────────────────────
@@ -381,6 +580,12 @@ def run_benchmark(config) -> dict:
                 mlflow.log_metric(f"{oc}_ft_auroc", metrics["auroc"])
             for oc, metrics in xgb_results.items():
                 mlflow.log_metric(f"{oc}_xgb_auroc", metrics["auroc"])
+            for oc, metrics in lr_trad_results.items():
+                if metrics:
+                    mlflow.log_metric(f"{oc}_lr_trad_auroc", metrics["auroc"])
+            for oc, metrics in gbt_results.items():
+                if metrics:
+                    mlflow.log_metric(f"{oc}_gbt_raw_auroc", metrics["auroc"])
             mlflow.log_artifact(str(results_path))
     except Exception as exc:
         log.debug("MLflow logging skipped: %s", exc)
