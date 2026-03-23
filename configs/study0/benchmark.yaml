@@ -22,6 +22,16 @@ outcomes:
   - sec_enforcement
   - bankruptcy
 
+labels:
+  decline_threshold: -0.20
+  treat_delisted_as_decline: true
+  restatement_source: "edgar_amendments"
+  audit_qualification_source: "external_csv"
+  sec_enforcement_source: "external_csv"
+  bankruptcy_source: "compustat"
+  external_label_dir: "data/raw/labels"
+  horizon_days: 365
+
 ft_transformer:
   d_token: 192
   n_heads: 8
