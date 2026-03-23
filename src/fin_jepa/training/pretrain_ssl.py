@@ -291,15 +291,17 @@ def run_ssl_experiment(config) -> dict:
     pretrained_results: dict[str, dict[str, dict]] = {}
     loss_curves: dict[str, list[float]] = {}
 
-    ssl_loader = make_dataloader(
-        splits["train"], feature_cols, label_col=None,
-        batch_size=pretrain_batch_size, shuffle=True,
-    )
-
     for ratio in mask_ratios:
         ratio_key = f"{ratio:.2f}"
         log.info("Pretraining with mask_ratio=%.2f ...", ratio)
         seed_everything(seed)
+
+        # Re-create DataLoader after re-seeding so shuffle order is
+        # identical across mask ratios (reproducibility).
+        ssl_loader = make_dataloader(
+            splits["train"], feature_cols, label_col=None,
+            batch_size=pretrain_batch_size, shuffle=True,
+        )
 
         encoder = FTTransformer(**model_kwargs)
         state_dict, losses = _pretrain_encoder(
@@ -405,17 +407,25 @@ def run_ssl_experiment(config) -> dict:
 
 
 if __name__ == "__main__":
+    import sys
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    # Dispatch: use ssl_experiment config → run_ssl_experiment,
+    #           otherwise default pretrain config → run_pretraining.
+    _use_ssl_experiment = any("ssl_experiment" in arg for arg in sys.argv)
+    _config_name = "ssl_experiment" if _use_ssl_experiment else "pretrain"
+    _entry_fn = run_ssl_experiment if _use_ssl_experiment else run_pretraining
 
     try:
         import hydra
         from omegaconf import DictConfig
 
-        @hydra.main(config_path="../../../configs/study0", config_name="pretrain", version_base=None)
+        @hydra.main(config_path="../../../configs/study0", config_name=_config_name, version_base=None)
         def main(cfg: DictConfig) -> None:
-            run_pretraining(cfg)
+            _entry_fn(cfg)
 
         main()
     except ImportError:
         log.warning("Hydra not available — running with empty config.")
-        run_pretraining({})
+        _entry_fn({})
