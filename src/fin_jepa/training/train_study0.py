@@ -15,7 +15,6 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -76,6 +75,7 @@ def train_ft_transformer(
             logits = model(x_batch).squeeze(-1)
             loss = criterion(logits, y_batch)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             train_loss += loss.item()
             n_batches += 1
@@ -122,20 +122,7 @@ def _evaluate_auroc(
     device: torch.device,
 ) -> float:
     """Compute AUROC on a DataLoader (returns 0.0 on degenerate input)."""
-    model.eval()
-    all_scores: list[np.ndarray] = []
-    all_labels: list[np.ndarray] = []
-
-    with torch.no_grad():
-        for x_batch, y_batch in loader:
-            x_batch = x_batch.to(device)
-            logits = model(x_batch).squeeze(-1)
-            scores = torch.sigmoid(logits).cpu().numpy()
-            all_scores.append(scores)
-            all_labels.append(y_batch.numpy())
-
-    y_true = np.concatenate(all_labels)
-    y_score = np.concatenate(all_scores)
+    y_true, y_score = _predict_scores(model, loader, device)
 
     # Need both classes to compute AUROC
     if len(np.unique(y_true)) < 2:

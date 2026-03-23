@@ -22,6 +22,7 @@ from fin_jepa.data.splits import SplitConfig
 from fin_jepa.data.xbrl_loader import load_xbrl_features
 from fin_jepa.data.labels import load_label_database
 from fin_jepa.models.ft_transformer import FTTransformer
+from fin_jepa.models.ssl_head import MaskedFeatureSSL
 from fin_jepa.training.dataset import make_dataloader
 from fin_jepa.training.metrics import compute_all_metrics
 from fin_jepa.training.train_study0 import (
@@ -34,7 +35,7 @@ from fin_jepa.utils.reproducibility import seed_everything
 
 log = logging.getLogger(__name__)
 
-# Defaults matching benchmark.yaml
+# Defaults matching configs/study0/benchmark.yaml — keep in sync if those change.
 _BENCHMARK_DEFAULTS = {
     "d_token": 192,
     "n_heads": 8,
@@ -133,6 +134,18 @@ def run_ablations(config) -> dict:
         all_sweep_results["train_fraction"] = results
         _save_sweep(results_dir / "train_fraction_sweep.json", results)
 
+    # ── mask_ratio sweep (SSL pretrain + fine-tune vs from-scratch) ──
+    mask_ratios = _cfg(config, "sweep.mask_ratio", [0.10, 0.15, 0.20, 0.30])
+    if mask_ratios:
+        log.info("Running mask_ratio sweep: %s", mask_ratios)
+        results = _run_mask_ratio_sweep(
+            splits, feature_cols, outcome, device,
+            mask_ratios=mask_ratios,
+            seed=seed,
+        )
+        all_sweep_results["mask_ratio"] = results
+        _save_sweep(results_dir / "mask_ratio_sweep.json", results)
+
     log.info("All ablation sweeps complete. Results in %s", results_dir)
     return all_sweep_results
 
@@ -226,8 +239,17 @@ def _train_and_evaluate(
     outcome: str,
     device: torch.device,
     model_kwargs: dict,
+    init_state_dict: dict | None = None,
 ) -> dict:
-    """Train an FT-Transformer and return test metrics."""
+    """Train an FT-Transformer and return test metrics.
+
+    Parameters
+    ----------
+    init_state_dict:
+        If provided, load these weights into the model before fine-tuning
+        (e.g. from SSL pretraining). Uses ``strict=False`` so the
+        classification head can differ.
+    """
     train_df = splits["train"][splits["train"][outcome].notna()]
     val_df = splits["val"][splits["val"][outcome].notna()]
     test_df = splits["test"][splits["test"][outcome].notna()]
@@ -246,6 +268,8 @@ def _train_and_evaluate(
     test_loader = make_dataloader(test_df, feature_cols, outcome, batch_size, shuffle=False)
 
     model = FTTransformer(**model_kwargs).to(device)
+    if init_state_dict is not None:
+        model.load_state_dict(init_state_dict, strict=False)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=_BENCHMARK_DEFAULTS["learning_rate"],
@@ -265,6 +289,67 @@ def _train_and_evaluate(
     y_true, y_score = _predict_scores(model, test_loader, device)
     metrics = compute_all_metrics(y_true, y_score)
     return metrics
+
+
+def _run_mask_ratio_sweep(
+    splits: dict,
+    feature_cols: list[str],
+    outcome: str,
+    device: torch.device,
+    mask_ratios: list[float],
+    seed: int = 42,
+    pretrain_epochs: int = 50,
+) -> list[dict]:
+    """Sweep SSL mask ratio: pretrain with each ratio, fine-tune, compare."""
+    results = []
+    n_features = len(feature_cols)
+    model_kwargs = {
+        "n_features": n_features,
+        "d_token": _BENCHMARK_DEFAULTS["d_token"],
+        "n_heads": _BENCHMARK_DEFAULTS["n_heads"],
+        "n_layers": _BENCHMARK_DEFAULTS["n_layers"],
+        "d_ffn_factor": _BENCHMARK_DEFAULTS["d_ffn_factor"],
+        "dropout": _BENCHMARK_DEFAULTS["dropout"],
+        "n_outputs": 1,
+    }
+
+    for ratio in mask_ratios:
+        seed_everything(seed)
+        log.info("  mask_ratio=%.2f", ratio)
+
+        # ── SSL pretraining ──────────────────────────────────────────
+        encoder = FTTransformer(**model_kwargs)
+        ssl_model = MaskedFeatureSSL(encoder, mask_ratio=ratio).to(device)
+        ssl_optimizer = torch.optim.AdamW(
+            ssl_model.parameters(), lr=1e-4, weight_decay=1e-5,
+        )
+
+        ssl_loader = make_dataloader(
+            splits["train"], feature_cols, label_col=None,
+            batch_size=_BENCHMARK_DEFAULTS["batch_size"], shuffle=True,
+        )
+
+        for _epoch in range(pretrain_epochs):
+            ssl_model.train()
+            for (x_batch,) in ssl_loader:
+                x_batch = x_batch.to(device)
+                ssl_optimizer.zero_grad()
+                loss, _, _ = ssl_model(x_batch)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(ssl_model.parameters(), max_norm=1.0)
+                ssl_optimizer.step()
+
+        # ── Fine-tune pretrained encoder on downstream task ──────────
+        pretrained_state = encoder.state_dict()
+
+        metrics = _train_and_evaluate(
+            splits, feature_cols, outcome, device, model_kwargs,
+            init_state_dict=pretrained_state,
+        )
+        metrics["mask_ratio"] = ratio
+        results.append(metrics)
+
+    return results
 
 
 def _save_sweep(path: Path, results: list[dict]) -> None:
