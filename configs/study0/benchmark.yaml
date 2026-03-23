@@ -38,7 +38,7 @@ labels:
   restatement_source: "edgar_amendments"
   audit_qualification_source: "external_csv"
   sec_enforcement_source: "external_csv"
-  bankruptcy_source: "compustat"
+  bankruptcy_source: "external_csv"
   external_label_dir: "data/raw/labels"
   horizon_days: 365
 
