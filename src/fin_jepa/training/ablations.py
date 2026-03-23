@@ -3,28 +3,289 @@ Ablation studies and scaling curves.
 
 Workstream: Run ablation studies and produce scaling curves.
 
-Ablations planned for Study 0
-------------------------------
-- Effect of SSL pretraining (pretrained vs. from-scratch)
-- Number of Transformer layers (1, 2, 3, 6)
-- Token dimension (64, 128, 192, 256)
-- Training set size scaling curve (10%, 25%, 50%, 75%, 100%)
-- Masking ratio for SSL pretraining (0.10, 0.15, 0.20, 0.30)
-- Feature set: XBRL raw vs. engineered ratios only vs. both
-
-TODO:
-  - Implement sweep runner using Optuna or manual grid
-  - Produce scaling curve plots (training size vs. AUROC)
-  - Save results to results/study0/ablations/
+Usage:
+    python -m fin_jepa.training.ablations experiment=study0/ablations
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn as nn
+
+from fin_jepa.data.feature_engineering import FeatureConfig, build_feature_matrix
+from fin_jepa.data.splits import SplitConfig
+from fin_jepa.data.xbrl_loader import load_xbrl_features
+from fin_jepa.data.labels import load_label_database
+from fin_jepa.models.ft_transformer import FTTransformer
+from fin_jepa.training.dataset import make_dataloader
+from fin_jepa.training.metrics import compute_all_metrics
+from fin_jepa.training.train_study0 import (
+    MIN_POSITIVES,
+    _cfg,
+    _predict_scores,
+    train_ft_transformer,
+)
+from fin_jepa.utils.reproducibility import seed_everything
 
 log = logging.getLogger(__name__)
 
+# Defaults matching benchmark.yaml
+_BENCHMARK_DEFAULTS = {
+    "d_token": 192,
+    "n_heads": 8,
+    "n_layers": 3,
+    "d_ffn_factor": 4,
+    "dropout": 0.0,
+    "batch_size": 256,
+    "epochs": 100,
+    "learning_rate": 1e-4,
+    "weight_decay": 1e-5,
+    "patience": 10,
+}
 
-def run_ablations(config: dict) -> None:
-    """Entry point for ablation study sweeps."""
-    raise NotImplementedError("Implement ablation study runner.")
+
+def run_ablations(config) -> dict:
+    """Entry point for ablation study sweeps.
+
+    Runs one-dimensional sweeps over architecture and data hyperparameters,
+    holding all other parameters at their default values.
+
+    Parameters
+    ----------
+    config : dict or DictConfig
+        Hydra configuration (from ``configs/study0/ablations.yaml``).
+
+    Returns
+    -------
+    dict mapping sweep name to list of per-point result dicts.
+    """
+    seed = int(_cfg(config, "seed", 42))
+    seed_everything(seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # ── Load and prepare data ────────────────────────────────────────
+    raw_dir = Path(_cfg(config, "data.raw_dir", "data/raw"))
+    processed_dir = Path(_cfg(config, "data.processed_dir", "data/processed"))
+
+    xbrl_df = load_xbrl_features(raw_dir)
+    labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
+    merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
+
+    split_cfg = SplitConfig(
+        train_end=_cfg(config, "data.split.train_end", "2017-12-31"),
+        val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
+        test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
+    )
+    splits, scaler, feature_cols = build_feature_matrix(merged, split_cfg)
+
+    outcomes = _cfg(config, "outcomes", ["stock_decline"])
+    # Use first outcome for ablations unless specified
+    if isinstance(outcomes, list):
+        outcome = outcomes[0]
+    else:
+        outcome = outcomes
+
+    results_dir = Path(_cfg(config, "results_dir", "results/study0/ablations"))
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    all_sweep_results: dict[str, list[dict]] = {}
+
+    # ── n_layers sweep ───────────────────────────────────────────────
+    n_layers_grid = _cfg(config, "sweep.n_layers", [1, 2, 3, 6])
+    if n_layers_grid:
+        log.info("Running n_layers sweep: %s", n_layers_grid)
+        results = _run_architecture_sweep(
+            splits, feature_cols, outcome, device,
+            param_name="n_layers",
+            param_values=n_layers_grid,
+            seed=seed,
+        )
+        all_sweep_results["n_layers"] = results
+        _save_sweep(results_dir / "n_layers_sweep.json", results)
+
+    # ── d_token sweep ────────────────────────────────────────────────
+    d_token_grid = _cfg(config, "sweep.d_token", [64, 128, 192, 256])
+    if d_token_grid:
+        log.info("Running d_token sweep: %s", d_token_grid)
+        results = _run_architecture_sweep(
+            splits, feature_cols, outcome, device,
+            param_name="d_token",
+            param_values=d_token_grid,
+            seed=seed,
+        )
+        all_sweep_results["d_token"] = results
+        _save_sweep(results_dir / "d_token_sweep.json", results)
+
+    # ── train_fraction sweep (scaling curve) ─────────────────────────
+    fractions = _cfg(config, "sweep.train_fractions", [0.10, 0.25, 0.50, 0.75, 1.0])
+    if fractions:
+        log.info("Running train_fraction sweep: %s", fractions)
+        results = _run_fraction_sweep(
+            splits, feature_cols, outcome, device,
+            fractions=fractions,
+            seed=seed,
+        )
+        all_sweep_results["train_fraction"] = results
+        _save_sweep(results_dir / "train_fraction_sweep.json", results)
+
+    log.info("All ablation sweeps complete. Results in %s", results_dir)
+    return all_sweep_results
+
+
+# ── Sweep helpers ────────────────────────────────────────────────────────
+
+
+def _run_architecture_sweep(
+    splits: dict,
+    feature_cols: list[str],
+    outcome: str,
+    device: torch.device,
+    param_name: str,
+    param_values: list,
+    seed: int = 42,
+) -> list[dict]:
+    """Sweep a single FT-Transformer hyperparameter, holding others at default."""
+    results = []
+
+    for value in param_values:
+        seed_everything(seed)
+        log.info("  %s=%s", param_name, value)
+
+        model_kwargs = {
+            "n_features": len(feature_cols),
+            "d_token": _BENCHMARK_DEFAULTS["d_token"],
+            "n_heads": _BENCHMARK_DEFAULTS["n_heads"],
+            "n_layers": _BENCHMARK_DEFAULTS["n_layers"],
+            "d_ffn_factor": _BENCHMARK_DEFAULTS["d_ffn_factor"],
+            "dropout": _BENCHMARK_DEFAULTS["dropout"],
+            "n_outputs": 1,
+        }
+        model_kwargs[param_name] = int(value)
+
+        # Adjust n_heads if d_token changes to stay divisible
+        if param_name == "d_token":
+            d = int(value)
+            # Use largest power-of-2 head count ≤ 8 that divides d_token
+            for nh in [8, 4, 2, 1]:
+                if d % nh == 0:
+                    model_kwargs["n_heads"] = nh
+                    break
+
+        metrics = _train_and_evaluate(
+            splits, feature_cols, outcome, device, model_kwargs,
+        )
+        results.append({param_name: value, **metrics})
+
+    return results
+
+
+def _run_fraction_sweep(
+    splits: dict,
+    feature_cols: list[str],
+    outcome: str,
+    device: torch.device,
+    fractions: list[float],
+    seed: int = 42,
+) -> list[dict]:
+    """Sweep training set size (scaling curve)."""
+    results = []
+    full_train = splits["train"]
+
+    for frac in fractions:
+        seed_everything(seed)
+        n_sample = max(1, int(len(full_train) * frac))
+        subsample = full_train.sample(n=n_sample, random_state=seed)
+        log.info("  train_fraction=%.2f (%d rows)", frac, n_sample)
+
+        sub_splits = {**splits, "train": subsample}
+        model_kwargs = {
+            "n_features": len(feature_cols),
+            "d_token": _BENCHMARK_DEFAULTS["d_token"],
+            "n_heads": _BENCHMARK_DEFAULTS["n_heads"],
+            "n_layers": _BENCHMARK_DEFAULTS["n_layers"],
+            "d_ffn_factor": _BENCHMARK_DEFAULTS["d_ffn_factor"],
+            "dropout": _BENCHMARK_DEFAULTS["dropout"],
+            "n_outputs": 1,
+        }
+        metrics = _train_and_evaluate(
+            sub_splits, feature_cols, outcome, device, model_kwargs,
+        )
+        results.append({"train_fraction": frac, "n_train": n_sample, **metrics})
+
+    return results
+
+
+def _train_and_evaluate(
+    splits: dict,
+    feature_cols: list[str],
+    outcome: str,
+    device: torch.device,
+    model_kwargs: dict,
+) -> dict:
+    """Train an FT-Transformer and return test metrics."""
+    train_df = splits["train"][splits["train"][outcome].notna()]
+    val_df = splits["val"][splits["val"][outcome].notna()]
+    test_df = splits["test"][splits["test"][outcome].notna()]
+
+    n_pos = int(train_df[outcome].sum())
+    if n_pos < MIN_POSITIVES:
+        log.warning("Fewer than %d positives — returning null metrics.", MIN_POSITIVES)
+        return {"auroc": None, "auprc": None, "skipped": True}
+
+    n_neg = len(train_df) - n_pos
+    pos_weight = n_neg / max(n_pos, 1)
+
+    batch_size = _BENCHMARK_DEFAULTS["batch_size"]
+    train_loader = make_dataloader(train_df, feature_cols, outcome, batch_size, shuffle=True)
+    val_loader = make_dataloader(val_df, feature_cols, outcome, batch_size, shuffle=False)
+    test_loader = make_dataloader(test_df, feature_cols, outcome, batch_size, shuffle=False)
+
+    model = FTTransformer(**model_kwargs).to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=_BENCHMARK_DEFAULTS["learning_rate"],
+        weight_decay=_BENCHMARK_DEFAULTS["weight_decay"],
+    )
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor([pos_weight], device=device),
+    )
+
+    train_ft_transformer(
+        model, train_loader, val_loader, criterion, optimizer,
+        device,
+        epochs=_BENCHMARK_DEFAULTS["epochs"],
+        patience=_BENCHMARK_DEFAULTS["patience"],
+    )
+
+    y_true, y_score = _predict_scores(model, test_loader, device)
+    metrics = compute_all_metrics(y_true, y_score)
+    return metrics
+
+
+def _save_sweep(path: Path, results: list[dict]) -> None:
+    """Write sweep results to JSON."""
+    with open(path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+    log.info("Sweep results saved to %s", path)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
+    try:
+        import hydra
+        from omegaconf import DictConfig
+
+        @hydra.main(config_path="../../../configs/study0", config_name="ablations", version_base=None)
+        def main(cfg: DictConfig) -> None:
+            run_ablations(cfg)
+
+        main()
+    except ImportError:
+        log.warning("Hydra not available — running with empty config.")
+        run_ablations({})
