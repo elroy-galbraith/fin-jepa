@@ -66,7 +66,22 @@ def compute_calibration(
 
 
 def compute_all_metrics(y_true: np.ndarray, y_score: np.ndarray) -> dict[str, float]:
-    """Compute AUROC, AUPRC, Brier score, and F1 at Youden threshold."""
+    """Compute AUROC, AUPRC, Brier score, and F1 at Youden threshold.
+
+    Returns a dict of NaN values if only one class is present in *y_true*.
+    """
+    # Guard against single-class test sets (e.g. rare outcomes with 0 positives)
+    if len(np.unique(y_true)) < 2:
+        return {
+            "auroc": float("nan"),
+            "auprc": float("nan"),
+            "brier": float("nan"),
+            "f1_youden": float("nan"),
+            "youden_threshold": float("nan"),
+            "ece": float("nan"),
+            "calibration": {"ece": float("nan"), "prob_true": [], "prob_pred": [], "n_bins": 10},
+        }
+
     from sklearn.metrics import roc_curve
 
     auroc = roc_auc_score(y_true, y_score)
@@ -93,8 +108,8 @@ def compute_all_metrics(y_true: np.ndarray, y_score: np.ndarray) -> dict[str, fl
 
 
 def go_no_go_gate(
-    ft_results: dict[str, float],
-    xgb_results: dict[str, float],
+    ft_results: dict[str, dict[str, float]],
+    xgb_results: dict[str, dict[str, float]],
     outcomes: list[str],
     margin: float = 0.01,
 ) -> tuple[bool, int, dict]:

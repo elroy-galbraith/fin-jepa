@@ -388,8 +388,11 @@ def run_benchmark(config) -> dict:
         # --- Optional Optuna tuning ---
         xgb_params: dict = {}
         gbt_params: dict = {}
-        lr_params: dict = {}
+        lr_full_params: dict = {}
+        lr_trad_params: dict = {}
         if do_tune:
+            lr_search = _cfg(config, "baselines.lr_search", {})
+
             xgb_search = _cfg(config, "baselines.xgboost_search", {})
             if xgb_search:
                 tune_result = tune_baseline(
@@ -400,7 +403,7 @@ def run_benchmark(config) -> dict:
                 xgb_params = tune_result["best_params"]
 
             gbt_search = _cfg(config, "baselines.gbt_search", {})
-            if gbt_search:
+            if gbt_search and raw_feature_cols:
                 tune_result = tune_baseline(
                     "gbt", build_gbt, dict(gbt_search),
                     train_valid, y_train, raw_feature_cols,
@@ -408,14 +411,22 @@ def run_benchmark(config) -> dict:
                 )
                 gbt_params = tune_result["best_params"]
 
-            lr_search = _cfg(config, "baselines.lr_search", {})
+            # Tune LR separately for full features and traditional ratios
             if lr_search:
                 tune_result = tune_baseline(
-                    "lr", build_logistic_regression, dict(lr_search),
-                    train_valid, y_train, trad_feature_cols,
+                    "lr_full", build_logistic_regression, dict(lr_search),
+                    train_valid, y_train, feature_cols,
                     n_splits=n_cv_splits, n_trials=n_trials, seed=seed,
                 )
-                lr_params = tune_result["best_params"]
+                lr_full_params = tune_result["best_params"]
+
+                if trad_feature_cols:
+                    tune_result = tune_baseline(
+                        "lr_trad", build_logistic_regression, dict(lr_search),
+                        train_valid, y_train, trad_feature_cols,
+                        n_splits=n_cv_splits, n_trials=n_trials, seed=seed,
+                    )
+                    lr_trad_params = tune_result["best_params"]
 
         # --- XGBoost on full XBRL features (primary benchmark) ---
         xgb_model = build_xgboost(
@@ -433,7 +444,7 @@ def run_benchmark(config) -> dict:
 
         # --- Logistic Regression on full features ---
         lr_model = build_logistic_regression(
-            C=float(lr_params.get("C", _cfg(config, "logistic_regression.C", 1.0))),
+            C=float(lr_full_params.get("C", _cfg(config, "logistic_regression.C", 1.0))),
             max_iter=int(_cfg(config, "logistic_regression.max_iter", 1000)),
         )
         lr_model.fit(X_train, y_train)
@@ -449,7 +460,7 @@ def run_benchmark(config) -> dict:
             X_test_trad = np.nan_to_num(X_test_trad, nan=0.0)
 
             lr_trad_model = build_logistic_regression(
-                C=float(lr_params.get("C", _cfg(config, "logistic_regression.C", 1.0))),
+                C=float(lr_trad_params.get("C", _cfg(config, "logistic_regression.C", 1.0))),
                 max_iter=int(_cfg(config, "logistic_regression.max_iter", 1000)),
             )
             lr_trad_model.fit(X_train_trad, y_train)
