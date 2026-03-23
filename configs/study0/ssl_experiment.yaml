@@ -1,0 +1,52 @@
+# Study 0 SSL Experiment config — ATS-167
+# Compare pretrained (masked feature reconstruction) vs from-scratch FT-Transformer.
+#
+# Usage:
+#   python -m fin_jepa.training.pretrain_ssl --config-name=ssl_experiment
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  split:
+    train_end: "2017-12-31"
+    val_end:   "2019-12-31"
+    test_end:  "2023-12-31"
+
+features:
+  use_raw: true
+  use_ratios: true
+  use_yoy: true
+  use_missingness_flags: true
+  coverage_threshold: 0.50
+  normalization_method: "quantile"
+  median_impute: true
+
+outcomes:
+  - stock_decline
+  - earnings_restate
+  - audit_qualification
+  - sec_enforcement
+  - bankruptcy
+
+ssl_experiment:
+  mask_ratios: [0.15, 0.30, 0.50]
+
+pretrain:
+  batch_size: 512
+  epochs: 200
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-5
+  warmup_epochs: 10
+
+ft_transformer:
+  d_token: 192
+  n_heads: 8
+  n_layers: 3
+  d_ffn_factor: 4
+  dropout: 0.0
+
+training:
+  seed: 42
+
+checkpoint_dir: models/checkpoints/study0_ssl_experiment
+results_dir: results/study0
