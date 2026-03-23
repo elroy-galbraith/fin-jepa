@@ -318,8 +318,10 @@ class FeatureScaler:
             else:
                 self._medians[col] = 0.0
 
-        # Impute for fitting purposes
+        # Impute for fitting purposes — record which columns were actually
+        # present during fit so transform() can enforce the same ordering.
         cols_present = [c for c in feature_cols if c in train_df.columns]
+        self._fit_cols: list[str] = cols_present
         work = train_df[cols_present].copy()
         for col in cols_present:
             work[col] = work[col].fillna(self._medians[col])
@@ -377,9 +379,18 @@ class FeatureScaler:
 
         # 3. Normalisation
         if self.method == "quantile" and self._qt is not None:
-            arr = out[cols_present].values
+            # QuantileTransformer requires the same columns in the same
+            # order as during fit.  Use self._fit_cols to guarantee this
+            # and raise a clear error if a required column is missing.
+            missing = [c for c in self._fit_cols if c not in out.columns]
+            if missing:
+                raise ValueError(
+                    f"Transform DataFrame is missing columns that were "
+                    f"present during fit: {missing}"
+                )
+            arr = out[self._fit_cols].values
             transformed = self._qt.transform(arr)
-            out[cols_present] = transformed
+            out[self._fit_cols] = transformed
         elif self.method == "zscore":
             for col in cols_present:
                 out[col] = (out[col] - self._mean[col]) / self._std[col]
