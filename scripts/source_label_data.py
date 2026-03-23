@@ -16,10 +16,19 @@ Data sources
 
 Both sources are free, require no API key, and return CIKs directly.
 
+.. important::
+
+   The sec_enforcement labels are a **noisy proxy** — not ground truth from
+   the Dechow AAER database.  Sources include Wells notices (pre-enforcement),
+   SEC settlement disclosures, and filings that reference AAERs.  The column
+   is named ``aaer_date`` for compatibility with the label builder's expected
+   schema, but the date represents the *filing date of the disclosure*, not
+   the date of an actual AAER.  Treat this as an approximate signal.
+
 Output
 ------
 ``data/raw/labels/sec_enforcement.csv``  (columns: cik, aaer_date)
-``data/raw/labels/bankruptcy.csv``       (columns: cik, filing_date, chapter)
+``data/raw/labels/bankruptcy.csv``       (columns: cik, filing_date)
 
 Usage
 -----
@@ -62,10 +71,6 @@ import requests  # noqa: E402
 
 EFTS_URL = "https://efts.sec.gov/LATEST/search-index"
 
-_DEFAULT_USER_AGENT = (
-    "fin-jepa-research admin@example.com"  # EDGAR requires contact info
-)
-
 # Date range matching the project universe (2012-2024)
 DEFAULT_START = "2012-01-01"
 DEFAULT_END = "2024-12-31"
@@ -86,9 +91,20 @@ def _elapsed(t0: float) -> str:
 
 
 def _get_session() -> requests.Session:
-    """Create a requests.Session with EDGAR-compliant headers."""
+    """Create a requests.Session with EDGAR-compliant headers.
+
+    Requires the ``EDGAR_USER_AGENT`` environment variable to be set
+    (e.g. ``"YourName your@email.com"``).  SEC EDGAR requires a real
+    contact email and may block requests with placeholder values.
+    """
+    ua = os.environ.get("EDGAR_USER_AGENT")
+    if not ua:
+        raise EnvironmentError(
+            "EDGAR_USER_AGENT environment variable is required.  "
+            "Set it to your name and email, e.g.: "
+            'export EDGAR_USER_AGENT="YourName your@email.com"'
+        )
     session = requests.Session()
-    ua = os.environ.get("EDGAR_USER_AGENT", _DEFAULT_USER_AGENT)
     session.headers.update({
         "User-Agent": ua,
         "Accept-Encoding": "gzip, deflate",
@@ -193,11 +209,21 @@ def _extract_cik_date_pairs(
 ) -> pd.DataFrame:
     """Extract (cik, date) pairs from EFTS hit sources.
 
-    Each EFTS hit has ``ciks`` (list) and ``file_date``.
-    We take the first CIK (primary filer) and the filing date.
+    Each EFTS hit has ``ciks`` (list), ``file_date``, and ``adsh``
+    (accession number).  We deduplicate on ``adsh`` first to avoid
+    counting the same filing twice when it appears in multiple queries,
+    then take the first CIK (primary filer) and the filing date.
     """
     records = []
+    seen_adsh: set[str] = set()
     for src in hits:
+        # Deduplicate on accession number to avoid double-counting
+        adsh = src.get("adsh", "")
+        if adsh and adsh in seen_adsh:
+            continue
+        if adsh:
+            seen_adsh.add(adsh)
+
         ciks = src.get("ciks", [])
         fdate = src.get(date_field)
         if not ciks or not fdate:
@@ -251,6 +277,7 @@ _ENFORCEMENT_QUERIES: list[tuple[str, list[str] | None]] = [
 def source_sec_enforcement(
     raw_dir: Path,
     session: requests.Session,
+    universe_ciks: set[str],
     start_date: str = DEFAULT_START,
     end_date: str = DEFAULT_END,
 ) -> pd.DataFrame:
@@ -260,12 +287,14 @@ def source_sec_enforcement(
     subject to SEC enforcement actions, then filters to the project
     universe.
 
+    .. note:: The resulting ``aaer_date`` column is the EDGAR filing date
+       of the disclosure, not the date of an actual AAER.  See module
+       docstring for details on this noisy proxy.
+
     Returns DataFrame with columns ``[cik, aaer_date]``.
     """
     t0 = time.time()
     logger.info("Sourcing SEC enforcement labels …")
-
-    universe_ciks = _load_universe_ciks(raw_dir)
 
     all_hits: list[dict] = []
     for i, (query, forms) in enumerate(_ENFORCEMENT_QUERIES, 1):
@@ -312,17 +341,16 @@ def source_sec_enforcement(
 def source_bankruptcy(
     raw_dir: Path,
     session: requests.Session,
+    universe_ciks: set[str],
     start_date: str = DEFAULT_START,
     end_date: str = DEFAULT_END,
 ) -> pd.DataFrame:
     """Source bankruptcy data from EFTS via 8-K Item 1.03 filings.
 
-    Returns DataFrame with columns ``[cik, filing_date, chapter]``.
+    Returns DataFrame with columns ``[cik, filing_date]``.
     """
     t0 = time.time()
     logger.info("Sourcing bankruptcy labels …")
-
-    universe_ciks = _load_universe_ciks(raw_dir)
 
     # Query 1: 8-K with "Item 1.03" — legally required bankruptcy disclosure
     logger.info('  Query 1: 8-K filings with "Item 1.03"')
@@ -350,12 +378,10 @@ def source_bankruptcy(
     df = _extract_cik_date_pairs(all_hits, date_field="file_date")
     if df.empty:
         logger.warning("  No bankruptcy events found from EFTS.")
-        df = pd.DataFrame(columns=["cik", "filing_date", "chapter"])
+        df = pd.DataFrame(columns=["cik", "filing_date"])
     else:
         df = df.rename(columns={"date": "filing_date"})
         df = df.drop_duplicates(subset=["cik", "filing_date"])
-        # Default to Chapter 11 — far more common for public companies
-        df["chapter"] = 11
         logger.info("  Unique (cik, filing_date) pairs: %d", len(df))
 
         # Filter to universe
@@ -380,13 +406,26 @@ def source_bankruptcy(
 # ── Validation ────────────────────────────────────────────────────────────────
 
 
-def validate_sourced_labels(raw_dir: Path) -> dict:
-    """Rebuild the label database and report coverage stats.
+def validate_sourced_labels(raw_dir: Path) -> dict | None:
+    """Rebuild the label database to a temp path and report coverage stats.
 
-    Imports the label builder, runs it with external_csv sources,
-    and prints the validation report.
+    Writes to a temporary parquet file so that the production
+    ``label_database.parquet`` is not overwritten as a side effect.
     """
+    labels_dir = raw_dir / "labels"
+    has_enforcement = (labels_dir / "sec_enforcement.csv").exists()
+    has_bankruptcy = (labels_dir / "bankruptcy.csv").exists()
+
+    if not has_enforcement and not has_bankruptcy:
+        logger.warning(
+            "No label CSVs found in %s — skipping validation.  "
+            "Run sourcing first.", labels_dir,
+        )
+        return None
+
     logger.info("Validating sourced labels …")
+
+    import tempfile
 
     from fin_jepa.data.labels import (
         LabelConfig,
@@ -394,7 +433,9 @@ def validate_sourced_labels(raw_dir: Path) -> dict:
         validate_label_database,
     )
 
-    output_path = raw_dir.parent / "processed" / "label_database.parquet"
+    # Write to a temp file so we don't overwrite the production parquet
+    tmp_dir = Path(tempfile.mkdtemp(prefix="label_validate_"))
+    output_path = tmp_dir / "label_database.parquet"
     config = LabelConfig(
         decline_threshold=-0.20,
         treat_delisted_as_decline=True,
@@ -492,22 +533,23 @@ def main() -> None:
 
     if not args.validate_only:
         session = _get_session()
+        universe_ciks = _load_universe_ciks(raw_dir)
 
         if not args.skip_enforcement:
             source_sec_enforcement(
-                raw_dir, session,
+                raw_dir, session, universe_ciks,
                 start_date=args.start_date,
                 end_date=args.end_date,
             )
 
         if not args.skip_bankruptcy:
             source_bankruptcy(
-                raw_dir, session,
+                raw_dir, session, universe_ciks,
                 start_date=args.start_date,
                 end_date=args.end_date,
             )
 
-    # Validate
+    # Validate (skips if no CSVs exist)
     validate_sourced_labels(raw_dir)
 
     logger.info("Done.  Total elapsed: %s", _elapsed(t0))
