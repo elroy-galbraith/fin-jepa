@@ -341,37 +341,46 @@ def run_ssl_experiment(config) -> dict:
     pretrained_results: dict[str, dict[str, dict]] = {}
     loss_curves: dict[str, list[float]] = {}
 
+    force_pretrain = bool(_cfg(config, "ssl_experiment.force_pretrain", False))
+    ckpt_dir = Path(_cfg(config, "checkpoint_dir", "models/checkpoints/study0_ssl_experiment"))
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
     for ratio in mask_ratios:
         ratio_key = f"{ratio:.2f}"
-        log.info("Pretraining with mask_ratio=%.2f ...", ratio)
-        seed_everything(seed)
-
-        # Re-create DataLoader after re-seeding so shuffle order is
-        # identical across mask ratios (reproducibility).
-        ssl_loader = make_dataloader(
-            splits["train"], feature_cols, label_col=None,
-            batch_size=pretrain_batch_size, shuffle=True,
-            cat_feature_cols=categorical_cols or None,
-        )
-
-        encoder = FTTransformer(**model_kwargs)
-        state_dict, losses = _pretrain_encoder(
-            encoder, ssl_loader,
-            mask_ratio=ratio,
-            device=device,
-            epochs=pretrain_epochs,
-            lr=pretrain_lr,
-            wd=pretrain_wd,
-            warmup_epochs=pretrain_warmup,
-        )
-        loss_curves[ratio_key] = losses
-
-        # Save checkpoint
-        ckpt_dir = Path(_cfg(config, "checkpoint_dir", "models/checkpoints/study0_ssl_experiment"))
-        ckpt_dir.mkdir(parents=True, exist_ok=True)
         ckpt_path = ckpt_dir / f"encoder_mr{ratio_key}.pt"
-        torch.save(state_dict, ckpt_path)
-        log.info("  checkpoint saved to %s", ckpt_path)
+
+        if not force_pretrain and ckpt_path.exists():
+            log.info(
+                "Skipping pretraining for mask_ratio=%.2f — loading checkpoint from %s",
+                ratio, ckpt_path,
+            )
+            state_dict = torch.load(ckpt_path, map_location=device)
+            loss_curves[ratio_key] = []
+        else:
+            log.info("Pretraining with mask_ratio=%.2f ...", ratio)
+            seed_everything(seed)
+
+            # Re-create DataLoader after re-seeding so shuffle order is
+            # identical across mask ratios (reproducibility).
+            ssl_loader = make_dataloader(
+                splits["train"], feature_cols, label_col=None,
+                batch_size=pretrain_batch_size, shuffle=True,
+                cat_feature_cols=categorical_cols or None,
+            )
+
+            encoder = FTTransformer(**model_kwargs)
+            state_dict, losses = _pretrain_encoder(
+                encoder, ssl_loader,
+                mask_ratio=ratio,
+                device=device,
+                epochs=pretrain_epochs,
+                lr=pretrain_lr,
+                wd=pretrain_wd,
+                warmup_epochs=pretrain_warmup,
+            )
+            loss_curves[ratio_key] = losses
+            torch.save(state_dict, ckpt_path)
+            log.info("  checkpoint saved to %s", ckpt_path)
 
         pretrained_results[ratio_key] = {}
         for outcome in outcomes:
