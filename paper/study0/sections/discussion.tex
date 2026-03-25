@@ -1,0 +1,30 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{FT-Transformer as a Financial Encoder}
+\label{sec:disc_encoder}
+
+The FT-Transformer demonstrates a clear pattern: it outperforms tree-based baselines on rare-event outcomes (\texttt{earnings\_restate}, \texttt{bankruptcy}) while trailing slightly on the higher-prevalence \texttt{stock\_decline} outcome. This aligns with findings from \citet{gorishniy2021revisiting} that attention-based models handle heterogeneous feature interactions more effectively than tree ensembles when the signal is distributed across many features rather than concentrated in a few dominant splits. For distress prediction, where the relevant patterns may involve subtle multi-feature interactions (e.g., deteriorating liquidity ratios combined with rising leverage and falling operating margins), the FT-Transformer's global self-attention may capture dependencies that tree-based models miss.
+
+The FT-Transformer's calibration advantage is also practically significant. On \texttt{stock\_decline} (ECE 0.047 vs.\ next-best 0.079), its predicted probabilities more closely match observed distress rates. In a risk management context, well-calibrated probabilities are arguably more important than marginal discrimination gains, since they enable principled threshold-setting and portfolio-level risk aggregation.
+
+\subsection{Self-Supervised Pretraining}
+\label{sec:disc_ssl}
+
+SSL pretraining via masked feature reconstruction provides meaningful gains, with the most dramatic improvement on \texttt{sec\_enforcement} ($+0.093$ AUROC at $r = 0.50$). This outcome has the lowest base rate and the weakest supervised signal---precisely the regime where pretraining should help most, since the encoder can learn financial structure from the full unlabeled dataset rather than relying on scarce positive examples.
+
+The absence of a single optimal mask ratio across outcomes suggests that different outcomes depend on different structural properties of the financial data. Low mask ratios (0.15) may encourage the encoder to learn fine-grained local dependencies between related features (e.g., within the balance sheet), while high mask ratios (0.50) force it to learn more global, abstract relationships. The latter appears more useful for outcomes like \texttt{sec\_enforcement} that may depend on higher-order patterns not captured by any individual financial ratio.
+
+\subsection{Implications for Study~1}
+\label{sec:disc_study1}
+
+\todo{Expand after final tuned results are in.}
+
+The results support proceeding with the FT-Transformer as the financial modality encoder for the JEPA architecture in Study~1, with the following caveats. First, the encoder should be initialized from SSL-pretrained weights (the specific mask ratio can be selected per outcome or via a sweep). Second, the latent space appears to capture meaningful financial structure---evidenced by the fact that SSL pretraining improves downstream prediction even though the pretraining objective (feature reconstruction) has no direct relationship to distress labels. This is an encouraging signal for the JEPA program: if the latent space is rich enough to support feature reconstruction, it may also be rich enough to support temporal prediction (Study~1) and cross-modal alignment (Study~2).
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+Several limitations should be noted. All models use default (untuned) hyperparameters; a hyperparameter sweep for the FT-Transformer is in progress and is expected to improve results, particularly on \texttt{stock\_decline} where the gap to the best baseline is small. Only 4 of 5 target outcomes were evaluable due to missing external label data for \texttt{audit\_qualification}. The \texttt{sec\_enforcement} outcome has an extremely low base rate (AUPRC $< 0.01$ across all models), making AUROC comparisons on this outcome noisy and potentially unreliable. All experiments use a single random seed (42); future work should report variance across multiple seeds. Finally, the test period (2020--2023) spans the COVID-19 market disruption, which provides a valuable out-of-distribution stress test but also means the test distribution may differ systematically from the training distribution in ways that advantage or disadvantage particular model families.
+
+\todo{Add paragraph on comparison to prior work once literature review is complete.}

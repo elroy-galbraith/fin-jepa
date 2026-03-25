@@ -35,431 +35,47 @@
 % ============================================================================
 % ABSTRACT
 % ============================================================================
-\begin{abstract}
-We evaluate the FT-Transformer architecture as a standalone encoder for structured financial data extracted from SEC EDGAR XBRL filings, benchmarking it against logistic regression, XGBoost, and gradient-boosted trees on multiple financial distress prediction tasks. We additionally investigate whether self-supervised pretraining via masked feature reconstruction improves downstream discriminative performance. This study serves as a validation gate for a larger research program investigating cross-modal joint-embedding predictive architectures for financial risk signals. All data extraction pipelines, feature definitions, and training code are released as open-source software.
-
-\todo{Revise abstract after results are finalized.}
-\end{abstract}
+\input{sections/abstract}
 
 % ============================================================================
 % 1. INTRODUCTION
 % ============================================================================
-\section{Introduction}
-\label{sec:introduction}
-
-Deep learning has achieved strong results across many domains, yet its adoption for tabular financial data remains limited. Tree-based ensembles---particularly XGBoost \citep{chen2016xgboost} and gradient-boosted trees---continue to dominate applied financial modeling, and recent comprehensive benchmarks confirm that they remain competitive with or superior to deep learning on many tabular tasks \citep{grinsztajn2022tree,shwartzziv2022tabular}. This presents a problem for research programs that aim to build multimodal financial architectures: if the base encoder for structured financial data cannot match conventional baselines, downstream gains from cross-modal integration are difficult to attribute.
-
-The FT-Transformer \citep{gorishniy2021revisiting} addresses several known failure modes of deep learning on tabular data. By tokenizing each input feature through a learned linear projection and processing the resulting sequence with standard Transformer attention, it avoids the feature-interaction bottlenecks of MLPs while preserving the inductive biases that make attention effective for heterogeneous input modalities. \citet{gorishniy2021revisiting} demonstrated that the FT-Transformer matches or exceeds gradient-boosted decision trees on a range of tabular benchmarks, making it a plausible backbone for financial data.
-
-However, financial tabular data presents distinct challenges that generic tabular benchmarks do not capture. XBRL (eXtensible Business Reporting Language) filings contain features with extreme tail distributions, systematic missingness driven by reporting standards rather than randomness, and temporal dependence structures that violate the i.i.d.\ assumptions of standard cross-validation. Whether the FT-Transformer's advantages generalize to this setting is an open empirical question.
-
-Self-supervised pretraining offers an additional potential advantage. In the natural language and computer vision domains, pretraining on unlabeled data before fine-tuning on task-specific labels consistently improves performance, especially in low-label regimes \citep{devlin2019bert,he2022masked}. For financial data, where distress events are rare and ground-truth labels are expensive to obtain, even modest gains from self-supervised initialization could be practically significant. We investigate masked feature reconstruction---a tabular analog of masked language modeling---as a pretraining strategy for the FT-Transformer.
-
-This paper makes the following contributions:
-\begin{enumerate}[leftmargin=*]
-  \item We construct a reproducible dataset of 16 XBRL-derived financial features for the full universe of SEC 10-K filers from 2012 to 2024, with five binary distress outcome labels, using only publicly available data sources.
-
-  \item We benchmark the FT-Transformer against logistic regression (with both traditional ratios and full feature sets), XGBoost, and a histogram-based gradient-boosted tree on distress prediction, using a strictly temporal evaluation protocol that prevents look-ahead bias.
-
-  \item We evaluate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer and measure its effect on downstream classification performance.
-
-  \item We release the complete data extraction pipeline, feature engineering code, model implementations, and evaluation scripts as open-source software to support reproducibility and further research.
-\end{enumerate}
-
-This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. The results here determine whether the FT-Transformer is a viable base encoder for the structured financial modality before committing to cross-modal integration in subsequent studies.
+\input{sections/introduction}
 
 % ============================================================================
 % 2. DATA
 % ============================================================================
-\section{Data}
-\label{sec:data}
-
-\subsection{Company Universe}
-\label{sec:universe}
-
-We construct a survivorship-bias-free universe of all entities that filed SEC Form 10-K annual reports between fiscal years 2012 and 2024. The universe is derived from two EDGAR data sources: (i)~the quarterly full-index files, which enumerate all filings by type and date, and (ii)~the per-company submissions API,\footnote{\url{https://data.sec.gov/submissions/CIK\{cik\}.json}} which provides metadata including ticker symbols, exchange listings, SIC codes, and fiscal year end dates.
-
-The 2012 start date is chosen because XBRL tagging became mandatory for all SEC filers in that year, ensuring consistent structured data availability across the universe. The universe includes all entities regardless of current listing status---delisted, bankrupt, and acquired companies are retained to avoid survivorship bias. We assign each company to one of 12 sectors using the Fama--French industry classification mapped from 4-digit SIC codes.
-
-The resulting universe contains approximately 8{,}000 unique companies. Each company-year observation is identified by its CIK (Central Index Key), ticker symbol, fiscal year, fiscal period end date, and 10-K filing date.
-
-\subsection{XBRL Feature Extraction}
-\label{sec:xbrl}
-
-We extract 16 financial features per company-year from the EDGAR Company Facts API,\footnote{\url{https://data.sec.gov/api/xbrl/companyfacts/CIK\{cik\}.json}} which provides structured XBRL data tagged with US-GAAP taxonomy concepts. For each target feature, we define an ordered list of candidate XBRL concept tags (e.g., \texttt{us-gaap:Assets}, \texttt{us-gaap:AssetsCurrent}) and resolve to the first available tag, accommodating variation in reporting practices across companies.
-
-We restrict extraction to annual (10-K / FY) filings. When multiple filings exist for the same company-year (e.g., due to amendments), we deduplicate by retaining the most recently filed version. All HTTP responses are cached to disk per CIK, and requests are rate-limited to $\leq$10 per second in compliance with SEC EDGAR fair-use policies.
-
-The 16 raw features span three financial statement categories:
-
-\paragraph{Balance sheet (8 features).} Total assets, total liabilities, stockholders' equity, current assets, current liabilities, retained earnings, cash and cash equivalents, and total debt (computed as the sum of long-term and short-term debt when reported separately).
-
-\paragraph{Income statement (5 features).} Total revenue, cost of goods sold, operating income, net income, and interest expense.
-
-\paragraph{Cash flow statement (3 features).} Cash from operations, cash from investing activities, and cash from financing activities.
-
-\subsection{Feature Engineering}
-\label{sec:features}
-
-From the 16 raw XBRL features, we derive two additional feature sets:
-
-\paragraph{Financial ratios (12 features).} We compute standard financial ratios spanning four categories: leverage (debt-to-equity, debt-to-assets, interest coverage, CFO-to-debt), liquidity (current ratio, quick ratio), profitability (return on assets, return on equity, gross margin, operating margin, net profit margin), and distress (Altman Z-score). The \citet{altman1968financial} Z-score is computed using the original 5-component formula:
-\begin{equation}
-  Z = 1.2\,X_1 + 1.4\,X_2 + 3.3\,X_3 + 0.6\,X_4 + 1.0\,X_5
-  \label{eq:altman}
-\end{equation}
-where $X_1 = \text{working capital} / \text{total assets}$, $X_2 = \text{retained earnings} / \text{total assets}$, $X_3 = \text{operating income} / \text{total assets}$, $X_4 = \text{equity} / \text{total liabilities}$, and $X_5 = \text{revenue} / \text{total assets}$. All divisions use a minimum absolute denominator threshold of $10^{-8}$ to avoid numerical instability, returning NaN where the denominator is effectively zero.
-
-\paragraph{Year-over-year changes (5 features).} For each of total revenue, net income, total assets, total debt, and cash from operations, we compute the year-over-year percentage change as $(x_t - x_{t-1}) / |x_{t-1}|$. Using the absolute value of the prior-year value in the denominator handles sign changes (e.g., a firm moving from negative to positive net income). The first observation per company is NaN by construction.
-
-\paragraph{Missingness indicators.} For each numeric feature retained after coverage pruning, we add a binary indicator variable equal to~1 if the original value was missing and~0 otherwise. These flags are not normalized.
-
-The default configuration uses all feature groups (raw + ratios + YoY + missingness flags), yielding up to 33 numeric features plus their corresponding missingness indicators.
-
-\subsection{Feature Normalization}
-\label{sec:normalization}
-
-Financial features exhibit extreme tail behavior that renders standard z-score normalization unreliable. We apply a three-stage normalization pipeline, fit exclusively on the training split to prevent look-ahead bias:
-
-\begin{enumerate}[leftmargin=*]
-  \item \textbf{Median imputation.} Missing values are replaced with the per-feature median computed on the training split.
-
-  \item \textbf{Winsorization.} Values are clipped to the 1st and 99th percentile bounds computed on the training split, attenuating the influence of extreme outliers.
-
-  \item \textbf{Quantile transformation.} We apply scikit-learn's \texttt{QuantileTransformer} with \texttt{output\_distribution='normal'} and up to 1{,}000 quantiles (minimum~2), which maps the empirical rank distribution of each feature to a standard normal distribution. This is the default normalization method; z-score standardization is available as an alternative.
-\end{enumerate}
-
-Features with less than 50\% non-null coverage in the training split are pruned before normalization. This threshold is applied at the training-split level to prevent information leakage from the validation or test periods.
-
-\subsection{Market Data}
-\label{sec:market}
-
-We collect daily adjusted OHLCV (open, high, low, close, volume) price data via yfinance for all tickers in the company universe, covering the period 2010-01-01 through 2024-12-31. The 2010 start date provides a two-year price history buffer before the first fiscal year in our sample (2012).
-
-For each company-year observation, we align market data to the 10-K filing date and compute forward returns at four horizons: 21, 63, 126, and 252 trading days. Returns are market-adjusted by subtracting the corresponding S\&P~500 (\^{}GSPC) return over the same window, and sector-adjusted using Fama--French 12-industry sector ETF returns. We compute 63-day average daily volume preceding the filing date as an additional feature. Companies with insufficient post-filing price data (indicating delisting) are flagged.
-
-\subsection{Distress Labels}
-\label{sec:labels}
-
-We construct five binary distress outcome labels per company-year, covering distinct dimensions of financial distress. Labels are assigned based on events occurring within a 365-day horizon following the fiscal period end date. Label columns use nullable Int8 dtype, where 0 indicates no event, 1 indicates a distress event, and NaN indicates that the label is unavailable for that observation (not equivalent to a negative label).
-
-\begin{table}[ht]
-  \centering
-  \caption{Distress outcome definitions.}
-  \label{tab:labels}
-  \small
-  \begin{tabular}{@{}lll@{}}
-    \toprule
-    Outcome & Source & Definition \\
-    \midrule
-    \texttt{stock\_decline} & Market data (computed) & Market-adj.\ 252-day return $< -20\%$ \\
-    \texttt{earnings\_restate} & EDGAR filing index & 10-K/A amendment filed within horizon \\
-    \texttt{sec\_enforcement} & Dechow et al.\ AAER database & SEC enforcement release within horizon \\
-    \texttt{bankruptcy} & UCLA-LoPucki BRD / Compustat & Chapter~7 or 11 filing within horizon \\
-    \texttt{audit\_qualification} & Audit Analytics (deferred) & Going-concern or adverse opinion \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-The first two outcomes (\texttt{stock\_decline} and \texttt{earnings\_restate}) are derived entirely from publicly available EDGAR data. The remaining three require external datasets: the Dechow et al.\ AAER database for SEC enforcement actions, the UCLA-LoPucki Bankruptcy Research Database for bankruptcy filings, and Audit Analytics for audit opinions. When external label files are not present, the corresponding label columns are all-NaN and the outcome is excluded from evaluation. Delisted companies with insufficient post-filing price data are treated as stock decline events.
-
-\todo{Update with final label coverage statistics once ATS-172 is complete.}
+\input{sections/data}
 
 % ============================================================================
 % 3. METHOD
 % ============================================================================
-\section{Method}
-\label{sec:method}
-
-\subsection{FT-Transformer}
-\label{sec:ft_transformer}
-
-We adopt the FT-Transformer architecture of \citet{gorishniy2021revisiting} as our primary encoder for structured financial data. The architecture consists of three components:
-
-\paragraph{Feature Tokenizer.} Each scalar input feature $x_i$ is projected to a $d$-dimensional token embedding via a per-feature affine transformation: $\mathbf{t}_i = \mathbf{W}_i x_i + \mathbf{b}_i$, where $\mathbf{W}_i \in \mathbb{R}^d$ and $\mathbf{b}_i \in \mathbb{R}^d$ are learnable parameters. Feature weights are initialized with Kaiming uniform initialization ($a = \sqrt{5}$). A learnable \textsc{[CLS]} token $\mathbf{t}_{\mathrm{cls}} \in \mathbb{R}^d$ is prepended to the token sequence, yielding a sequence of $n + 1$ tokens where $n$ is the number of input features.
-
-\paragraph{Transformer Encoder.} The token sequence is processed by a stack of $L$ standard Transformer encoder layers \citep{vaswani2017attention}. Each layer applies multi-head self-attention followed by a position-wise feed-forward network, with pre-layer normalization (norm-first configuration). The feed-forward hidden dimension is set to $d \times f$ where $f$ is a configurable expansion factor. We use PyTorch's \texttt{nn.TransformerEncoderLayer} with batch-first processing.
-
-\paragraph{Classification Head.} The \textsc{[CLS]} token representation from the final encoder layer is passed through a classification head consisting of LayerNorm $\rightarrow$ ReLU $\rightarrow$ Linear, producing a single logit for binary classification. The model is trained with binary cross-entropy with logits loss (\texttt{BCEWithLogitsLoss}).
-
-Default hyperparameters: $d = 192$ (token dimension), $h = 8$ (attention heads), $L = 3$ (layers), $f = 4$ (FFN expansion factor), dropout $= 0.0$. These follow the recommendations in \citet{gorishniy2021revisiting} for medium-sized tabular datasets.
-
-\subsection{Baseline Models}
-\label{sec:baselines}
-
-We compare the FT-Transformer against three baseline models spanning classical and ensemble approaches:
-
-\paragraph{Logistic Regression (LR).} An L2-regularized logistic regression with balanced class weighting, preceded by standard scaling (scikit-learn \texttt{StandardScaler} $\rightarrow$ \texttt{LogisticRegression}). Regularization strength $C = 1.0$, solver = L-BFGS, maximum 1{,}000 iterations. We evaluate two feature configurations: LR-full (all engineered features) and LR-traditional (10 traditional financial ratios only: Altman Z-score, current ratio, quick ratio, debt-to-equity, debt-to-assets, ROA, ROE, net profit margin, interest coverage, and CFO-to-debt).
-
-\paragraph{XGBoost.} Extreme gradient-boosted trees \citep{chen2016xgboost} with 500 estimators, learning rate 0.05, max depth~6, subsample ratio 0.8, column subsample ratio 0.8. Evaluation metric: AUC.
-
-\paragraph{Histogram Gradient-Boosted Trees (GBT).} Scikit-learn's \texttt{HistGradientBoostingClassifier} with 500 iterations, learning rate 0.05, max depth~6, minimum 20 samples per leaf, balanced class weighting. This model natively handles NaN values, making it suitable for evaluation on raw XBRL features with minimal preprocessing.
-
-All baseline hyperparameters use default (untuned) values for the initial benchmark. Optional Optuna-based temporal cross-validation tuning is supported (30 trials, 3-fold expanding-window CV) but is disabled in the default configuration.
-
-\subsection{Self-Supervised Pretraining}
-\label{sec:ssl}
-
-We investigate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer, analogous to masked language modeling \citep{devlin2019bert} applied to tabular features.
-
-\paragraph{Masking strategy.} For each training sample, a fraction $r$ of input features are independently selected for masking via Bernoulli sampling. Masked feature values are replaced with zero in the input. We experiment with mask ratios $r \in \{0.15, 0.30, 0.50\}$.
-
-\paragraph{Reconstruction head.} A two-layer MLP reconstructs all $n$ feature values from the \textsc{[CLS]} token representation: $\text{Linear}(d, 2d) \rightarrow \text{GELU} \rightarrow \text{Linear}(2d, n)$. The reconstruction loss is computed as the mean squared error over masked positions only:
-\begin{equation}
-  \mathcal{L}_{\text{SSL}} = \frac{\sum_{i \in M} (\hat{x}_i - x_i)^2}{|M|}
-  \label{eq:ssl_loss}
-\end{equation}
-where $M$ is the set of masked feature indices and $\hat{x}_i$ is the predicted value for feature~$i$.
-
-\paragraph{Pretraining protocol.} The FT-Transformer encoder and reconstruction head are trained jointly for 200 epochs with a batch size of 512. We use AdamW optimization with learning rate $10^{-4}$ and weight decay $10^{-5}$. The learning rate follows a linear warmup over 10 epochs followed by cosine annealing to zero. Pretraining uses all available training-split data regardless of label availability.
-
-\paragraph{Fine-tuning.} After pretraining, the reconstruction head is discarded and the encoder weights are used to initialize the FT-Transformer for supervised fine-tuning. Fine-tuning uses the same protocol as training from scratch (\Cref{sec:training}).
-
-\subsection{Training Protocol}
-\label{sec:training}
-
-\paragraph{FT-Transformer training.} Batch size 256, maximum 100 epochs, AdamW optimizer with learning rate $10^{-4}$ and weight decay $10^{-5}$. Early stopping with patience 10 epochs on validation AUROC. Gradient norms are clipped to 1.0. Predictions are obtained by applying sigmoid to model logits.
-
-\paragraph{Baseline training.} Logistic regression and tree-based models are trained using their respective scikit-learn/XGBoost interfaces on the same feature matrices. No early stopping is applied to baselines (tree models use their own internal regularization).
-
-\paragraph{Reproducibility.} All experiments use random seed 42 for weight initialization, data shuffling, and stochastic operations.
+\input{sections/method}
 
 % ============================================================================
 % 4. EXPERIMENTAL SETUP
 % ============================================================================
-\section{Experimental Setup}
-\label{sec:setup}
-
-\subsection{Data Splits}
-\label{sec:splits}
-
-We use a strictly temporal split to prevent any form of look-ahead bias:
-
-\begin{table}[ht]
-  \centering
-  \caption{Temporal data splits.}
-  \label{tab:splits}
-  \small
-  \begin{tabular}{@{}llc@{}}
-    \toprule
-    Split & Period & Fiscal period end date \\
-    \midrule
-    Train & 2012--2017 & $\leq$ 2017-12-31 \\
-    Validation & 2018--2019 & $>$ 2017-12-31 and $\leq$ 2019-12-31 \\
-    Test & 2020--2023 & $>$ 2019-12-31 and $\leq$ 2023-12-31 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-Splits are defined by the fiscal period end date (not the filing date or calendar year). This means a 10-K for fiscal year ending December 2017, filed in March 2018, is assigned to the training split. The test period deliberately spans the COVID-19 market disruption (2020) through the subsequent recovery, providing an out-of-distribution stress test.
-
-All feature normalization statistics (medians, percentile bounds, quantile mappings) and coverage pruning decisions are computed on the training split only and applied identically to the validation and test splits.
-
-\todo{Update with exact split sizes once final pipeline is run (preliminary: ${\sim}$13,920 train / ${\sim}$5,657 val / ${\sim}$14,160 test).}
-
-\subsection{Evaluation Metrics}
-\label{sec:metrics}
-
-We report the following metrics for each model--outcome pair, all computed on the held-out test split:
-
-\paragraph{Primary metric:} AUROC (Area Under the Receiver Operating Characteristic curve). This is the metric used for model selection, early stopping, and the go/no-go gate decision.
-
-\paragraph{Secondary metrics:}
-\begin{itemize}[leftmargin=*]
-  \item \textbf{AUPRC} (Area Under the Precision-Recall Curve): more informative than AUROC under class imbalance, as it is sensitive to the positive class base rate.
-  \item \textbf{Brier score}: mean squared error between predicted probabilities and binary outcomes, measuring both discrimination and calibration.
-  \item \textbf{F1 at Youden threshold}: F1 score at the threshold maximizing Youden's $J$ statistic ($\text{TPR} - \text{FPR}$), providing a discrimination measure at a principled operating point.
-  \item \textbf{ECE} (Expected Calibration Error): computed over 10 uniform-width bins, measuring the average gap between predicted probability and observed frequency.
-\end{itemize}
-
-For outcomes where the test split contains only one class (all positives or all negatives), all metrics return NaN and the outcome is excluded from aggregate comparisons.
-
-\subsection{Go/No-Go Gate}
-\label{sec:gate}
-
-This study serves as a validation gate for subsequent work. The FT-Transformer passes the gate if it achieves AUROC at least 0.01 higher than XGBoost on three or more of the five distress outcomes (evaluated on the test set). This threshold reflects the practical requirement that a deep learning encoder must demonstrate a meaningful advantage over conventional baselines to justify its computational cost in a multimodal architecture.
-
-\todo{The final benchmark (ATS-169) will include bootstrap confidence intervals (1,000 resamples) on AUROC differences to quantify statistical significance.}
+\input{sections/setup}
 
 % ============================================================================
 % 5. RESULTS
 % ============================================================================
-\section{Results}
-\label{sec:results}
-
-Four of five distress outcomes were evaluable. \texttt{audit\_qualification} was excluded due to missing external label data (all-NaN in the test split). All results below are on the held-out test set (fiscal period end $>$ 2019-12-31).
-
-\subsection{Baseline Comparison}
-\label{sec:results_baseline}
-
-\Cref{tab:auroc} reports test AUROC for all models across the four evaluable outcomes. The FT-Transformer column reports the supervised (from-scratch) model; SSL-pretrained variants are presented separately in \Cref{sec:results_ssl}.
-
-\begin{table}[ht]
-  \centering
-  \caption{Test set AUROC by model and outcome (untuned models). Best result per outcome in \textbf{bold}.}
-  \label{tab:auroc}
-  \small
-  \begin{tabular}{@{}lcccc@{}}
-    \toprule
-    Model & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
-    \midrule
-    LR (traditional ratios) & 0.644 & 0.619 & \textbf{0.606} & \textbf{0.646} \\
-    LR (full features) & \textbf{0.682} & 0.660 & 0.399 & 0.640 \\
-    XGBoost & 0.652 & 0.648 & 0.534 & 0.617 \\
-    GBT (raw XBRL) & 0.677 & 0.670 & 0.601 & 0.561 \\
-    FT-Transformer (scratch) & 0.660 & \textbf{0.681} & 0.527 & \textbf{0.653} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-The FT-Transformer achieves the highest AUROC on \texttt{earnings\_restate} (0.681) and \texttt{bankruptcy} (0.653), outperforming all baselines including GBT and XGBoost. On \texttt{stock\_decline}, it trails LR-full (0.682) and GBT (0.677) but exceeds XGBoost (0.652). On \texttt{sec\_enforcement}, all models struggle---the outcome has an extremely low base rate (AUPRC $< 0.01$ across all models), and AUROC values hover near chance for several models, suggesting that the XBRL feature set alone carries limited signal for SEC enforcement actions.
-
-\begin{table}[ht]
-  \centering
-  \caption{Full test metrics for FT-Transformer (scratch) vs.\ best baseline per outcome. Best per outcome--metric pair in \textbf{bold}.}
-  \label{tab:full_metrics}
-  \small
-  \begin{tabular}{@{}llccccc@{}}
-    \toprule
-    Outcome & Model & AUROC & AUPRC & Brier & F1 (Youden) & ECE \\
-    \midrule
-    \texttt{stock\_decline} & FT-Transformer & 0.660 & 0.728 & 0.227 & 0.661 & \textbf{0.047} \\
-    \texttt{stock\_decline} & LR-full (best) & \textbf{0.682} & \textbf{0.735} & \textbf{0.226} & \textbf{0.666} & 0.081 \\
-    \midrule
-    \texttt{earnings\_restate} & FT-Transformer & \textbf{0.681} & \textbf{0.191} & \textbf{0.221} & \textbf{0.273} & 0.352 \\
-    \texttt{earnings\_restate} & GBT (best) & 0.670 & 0.190 & 0.227 & 0.263 & \textbf{0.359} \\
-    \midrule
-    \texttt{sec\_enforcement} & FT-Transformer & 0.527 & 0.008 & 0.050 & 0.015 & 0.164 \\
-    \texttt{sec\_enforcement} & LR-trad (best) & \textbf{0.606} & \textbf{0.010} & 0.229 & \textbf{0.025} & 0.456 \\
-    \midrule
-    \texttt{bankruptcy} & FT-Transformer & \textbf{0.653} & \textbf{0.017} & 0.192 & \textbf{0.030} & 0.384 \\
-    \texttt{bankruptcy} & LR-trad (best) & 0.646 & 0.014 & \textbf{0.220} & 0.032 & 0.437 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-Calibration is a notable FT-Transformer strength: on \texttt{stock\_decline}, its ECE (0.047) is substantially lower than any baseline (next best: LR-traditional at 0.079). This suggests the Transformer's probability estimates are better calibrated even where its discrimination is slightly weaker.
-
-\subsection{Self-Supervised Pretraining}
-\label{sec:results_ssl}
-
-\Cref{tab:ssl} reports test AUROC for the FT-Transformer initialized from scratch versus three SSL mask ratios. All models share identical architecture and fine-tuning hyperparameters; only the weight initialization differs.
-
-\begin{table}[ht]
-  \centering
-  \caption{Test AUROC: FT-Transformer with and without SSL pretraining. Best per outcome in \textbf{bold}.}
-  \label{tab:ssl}
-  \small
-  \begin{tabular}{@{}lcccc@{}}
-    \toprule
-    Initialization & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
-    \midrule
-    Scratch & 0.663 & 0.679 & 0.552 & 0.627 \\
-    SSL ($r = 0.15$) & \textbf{0.672} & 0.667 & 0.590 & \textbf{0.679} \\
-    SSL ($r = 0.30$) & 0.663 & 0.676 & 0.613 & 0.656 \\
-    SSL ($r = 0.50$) & 0.662 & \textbf{0.685} & \textbf{0.645} & 0.665 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-SSL pretraining provides the largest gains on \texttt{sec\_enforcement} ($+0.093$ AUROC at $r = 0.50$ vs.\ scratch) and \texttt{bankruptcy} ($+0.052$ at $r = 0.15$). On \texttt{stock\_decline}, $r = 0.15$ provides a modest lift ($+0.009$). On \texttt{earnings\_restate}, $r = 0.50$ yields a small improvement ($+0.006$). No single mask ratio dominates across all outcomes: $r = 0.15$ is best for \texttt{stock\_decline} and \texttt{bankruptcy}, while $r = 0.50$ is best for \texttt{earnings\_restate} and \texttt{sec\_enforcement}.
-
-The strongest SSL result is on \texttt{sec\_enforcement}, where $r = 0.50$ (AUROC 0.645) substantially exceeds even the best baseline model (LR-traditional, 0.606). This is notable because \texttt{sec\_enforcement} is the outcome where the scratch FT-Transformer performed worst---suggesting that SSL pretraining may be most valuable precisely where supervised signal is weakest.
-
-\subsection{Go/No-Go Gate}
-\label{sec:results_gate}
-
-The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 5 outcomes. With the current results (scratch FT-Transformer, untuned, 4 outcomes evaluable):
-
-\begin{table}[ht]
-  \centering
-  \caption{Go/no-go gate evaluation (FT-Transformer scratch vs.\ XGBoost).}
-  \label{tab:gate}
-  \small
-  \begin{tabular}{@{}lcccc@{}}
-    \toprule
-    Outcome & FT-Trans.\ & XGBoost & $\Delta$ AUROC & Win ($\geq 0.01$)? \\
-    \midrule
-    \texttt{stock\_decline} & 0.660 & 0.652 & $+0.008$ & No \\
-    \texttt{earnings\_restate} & 0.681 & 0.648 & $+0.033$ & \textbf{Yes} \\
-    \texttt{sec\_enforcement} & 0.527 & 0.534 & $-0.007$ & No \\
-    \texttt{bankruptcy} & 0.653 & 0.617 & $+0.036$ & \textbf{Yes} \\
-    \texttt{audit\_qualification} & --- & --- & --- & N/A \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\textbf{Gate result: not passed (2 wins of 3 required).} The FT-Transformer wins decisively on \texttt{earnings\_restate} ($+0.033$) and \texttt{bankruptcy} ($+0.036$), narrowly misses on \texttt{stock\_decline} ($+0.008$, just below the 0.01 margin), and loses on \texttt{sec\_enforcement} ($-0.007$).
-
-However, several factors suggest the gate outcome is likely to improve:
-
-\begin{enumerate}[leftmargin=*]
-  \item \textbf{Hyperparameter tuning has not been performed.} All FT-Transformer results use default hyperparameters ($d = 192$, $L = 3$, $\text{lr} = 10^{-4}$). A sweep is expected to close the 0.002 gap on \texttt{stock\_decline}.
-
-  \item \textbf{SSL pretraining is not reflected in the gate.} The best SSL-pretrained model ($r = 0.15$) achieves 0.672 on \texttt{stock\_decline}---which would bring the margin to $+0.020$, comfortably passing the gate on that outcome.
-
-  \item \textbf{\texttt{audit\_qualification} is missing.} Adding a fifth evaluable outcome provides another opportunity to accumulate wins. The FT-Transformer's pattern of outperforming on rare-event outcomes suggests it may perform well here.
-\end{enumerate}
-
-The recommendation from the SSL experiment pipeline is \textbf{``proceed''}---consistent with the view that the gate is within reach pending tuning and additional label data.
-
-\todo{Remaining: ATS-169 hyperparameter sweep, re-run SSL with tuned architecture, final head-to-head with bootstrap CIs, audit\_qualification labels from ATS-172.}
+\input{sections/results}
 
 % ============================================================================
 % 6. DISCUSSION
 % ============================================================================
-\section{Discussion}
-\label{sec:discussion}
-
-\subsection{FT-Transformer as a Financial Encoder}
-\label{sec:disc_encoder}
-
-The FT-Transformer demonstrates a clear pattern: it outperforms tree-based baselines on rare-event outcomes (\texttt{earnings\_restate}, \texttt{bankruptcy}) while trailing slightly on the higher-prevalence \texttt{stock\_decline} outcome. This aligns with findings from \citet{gorishniy2021revisiting} that attention-based models handle heterogeneous feature interactions more effectively than tree ensembles when the signal is distributed across many features rather than concentrated in a few dominant splits. For distress prediction, where the relevant patterns may involve subtle multi-feature interactions (e.g., deteriorating liquidity ratios combined with rising leverage and falling operating margins), the FT-Transformer's global self-attention may capture dependencies that tree-based models miss.
-
-The FT-Transformer's calibration advantage is also practically significant. On \texttt{stock\_decline} (ECE 0.047 vs.\ next-best 0.079), its predicted probabilities more closely match observed distress rates. In a risk management context, well-calibrated probabilities are arguably more important than marginal discrimination gains, since they enable principled threshold-setting and portfolio-level risk aggregation.
-
-\subsection{Self-Supervised Pretraining}
-\label{sec:disc_ssl}
-
-SSL pretraining via masked feature reconstruction provides meaningful gains, with the most dramatic improvement on \texttt{sec\_enforcement} ($+0.093$ AUROC at $r = 0.50$). This outcome has the lowest base rate and the weakest supervised signal---precisely the regime where pretraining should help most, since the encoder can learn financial structure from the full unlabeled dataset rather than relying on scarce positive examples.
-
-The absence of a single optimal mask ratio across outcomes suggests that different outcomes depend on different structural properties of the financial data. Low mask ratios (0.15) may encourage the encoder to learn fine-grained local dependencies between related features (e.g., within the balance sheet), while high mask ratios (0.50) force it to learn more global, abstract relationships. The latter appears more useful for outcomes like \texttt{sec\_enforcement} that may depend on higher-order patterns not captured by any individual financial ratio.
-
-\subsection{Implications for Study~1}
-\label{sec:disc_study1}
-
-\todo{Expand after final tuned results are in.}
-
-The results support proceeding with the FT-Transformer as the financial modality encoder for the JEPA architecture in Study~1, with the following caveats. First, the encoder should be initialized from SSL-pretrained weights (the specific mask ratio can be selected per outcome or via a sweep). Second, the latent space appears to capture meaningful financial structure---evidenced by the fact that SSL pretraining improves downstream prediction even though the pretraining objective (feature reconstruction) has no direct relationship to distress labels. This is an encouraging signal for the JEPA program: if the latent space is rich enough to support feature reconstruction, it may also be rich enough to support temporal prediction (Study~1) and cross-modal alignment (Study~2).
-
-\subsection{Limitations}
-\label{sec:limitations}
-
-Several limitations should be noted. All models use default (untuned) hyperparameters; a hyperparameter sweep for the FT-Transformer is in progress and is expected to improve results, particularly on \texttt{stock\_decline} where the gap to the best baseline is small. Only 4 of 5 target outcomes were evaluable due to missing external label data for \texttt{audit\_qualification}. The \texttt{sec\_enforcement} outcome has an extremely low base rate (AUPRC $< 0.01$ across all models), making AUROC comparisons on this outcome noisy and potentially unreliable. All experiments use a single random seed (42); future work should report variance across multiple seeds. Finally, the test period (2020--2023) spans the COVID-19 market disruption, which provides a valuable out-of-distribution stress test but also means the test distribution may differ systematically from the training distribution in ways that advantage or disadvantage particular model families.
-
-\todo{Add paragraph on comparison to prior work once literature review is complete.}
+\input{sections/discussion}
 
 % ============================================================================
 % 7. OPEN-SOURCE RELEASE
 % ============================================================================
-\section{Open-Source Release}
-\label{sec:release}
-
-We release the following artifacts alongside this report:
-
-\begin{enumerate}[leftmargin=*]
-  \item \textbf{EDGAR XBRL extraction pipeline}---automated download and parsing of Company Facts API data for the full SEC filer universe.
-  \item \textbf{Feature definitions and normalization code}---16 raw features, 12 financial ratios, 5 YoY changes, with configurable winsorization and quantile normalization.
-  \item \textbf{Company universe and split specifications}---survivorship-bias-free universe construction and reproducible temporal split definitions.
-  \item \textbf{Training and evaluation scripts}---FT-Transformer, baseline models, SSL pretraining, and the full evaluation harness with all reported metrics.
-\end{enumerate}
-
-Code repository: \todo{Add repository URL.}
+\input{sections/release}
 
 % ============================================================================
 % REFERENCES
 % ============================================================================
 \bibliographystyle{plainnat}
-\bibliography{references}
+\bibliography{bib/references}
 
 \end{document}

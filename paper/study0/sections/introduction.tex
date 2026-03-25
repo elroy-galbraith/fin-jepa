@@ -1,0 +1,23 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Deep learning has achieved strong results across many domains, yet its adoption for tabular financial data remains limited. Tree-based ensembles---particularly XGBoost \citep{chen2016xgboost} and gradient-boosted trees---continue to dominate applied financial modeling, and recent comprehensive benchmarks confirm that they remain competitive with or superior to deep learning on many tabular tasks \citep{grinsztajn2022tree,shwartzziv2022tabular}. This presents a problem for research programs that aim to build multimodal financial architectures: if the base encoder for structured financial data cannot match conventional baselines, downstream gains from cross-modal integration are difficult to attribute.
+
+The FT-Transformer \citep{gorishniy2021revisiting} addresses several known failure modes of deep learning on tabular data. By tokenizing each input feature through a learned linear projection and processing the resulting sequence with standard Transformer attention, it avoids the feature-interaction bottlenecks of MLPs while preserving the inductive biases that make attention effective for heterogeneous input modalities. \citet{gorishniy2021revisiting} demonstrated that the FT-Transformer matches or exceeds gradient-boosted decision trees on a range of tabular benchmarks, making it a plausible backbone for financial data.
+
+However, financial tabular data presents distinct challenges that generic tabular benchmarks do not capture. XBRL (eXtensible Business Reporting Language) filings contain features with extreme tail distributions, systematic missingness driven by reporting standards rather than randomness, and temporal dependence structures that violate the i.i.d.\ assumptions of standard cross-validation. Whether the FT-Transformer's advantages generalize to this setting is an open empirical question.
+
+Self-supervised pretraining offers an additional potential advantage. In the natural language and computer vision domains, pretraining on unlabeled data before fine-tuning on task-specific labels consistently improves performance, especially in low-label regimes \citep{devlin2019bert,he2022masked}. For financial data, where distress events are rare and ground-truth labels are expensive to obtain, even modest gains from self-supervised initialization could be practically significant. We investigate masked feature reconstruction---a tabular analog of masked language modeling---as a pretraining strategy for the FT-Transformer.
+
+This paper makes the following contributions:
+\begin{enumerate}[leftmargin=*]
+  \item We construct a reproducible dataset of 16 XBRL-derived financial features for the full universe of SEC 10-K filers from 2012 to 2024, with five binary distress outcome labels, using only publicly available data sources.
+
+  \item We benchmark the FT-Transformer against logistic regression (with both traditional ratios and full feature sets), XGBoost, and a histogram-based gradient-boosted tree on distress prediction, using a strictly temporal evaluation protocol that prevents look-ahead bias.
+
+  \item We evaluate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer and measure its effect on downstream classification performance.
+
+  \item We release the complete data extraction pipeline, feature engineering code, model implementations, and evaluation scripts as open-source software to support reproducibility and further research.
+\end{enumerate}
+
+This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. The results here determine whether the FT-Transformer is a viable base encoder for the structured financial modality before committing to cross-modal integration in subsequent studies.

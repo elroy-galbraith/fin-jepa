@@ -1,0 +1,93 @@
+\section{Data}
+\label{sec:data}
+
+\subsection{Company Universe}
+\label{sec:universe}
+
+We construct a survivorship-bias-free universe of all entities that filed SEC Form 10-K annual reports between fiscal years 2012 and 2024. The universe is derived from two EDGAR data sources: (i)~the quarterly full-index files, which enumerate all filings by type and date, and (ii)~the per-company submissions API,\footnote{\url{https://data.sec.gov/submissions/CIK\{cik\}.json}} which provides metadata including ticker symbols, exchange listings, SIC codes, and fiscal year end dates.
+
+The 2012 start date is chosen because XBRL tagging became mandatory for all SEC filers in that year, ensuring consistent structured data availability across the universe. The universe includes all entities regardless of current listing status---delisted, bankrupt, and acquired companies are retained to avoid survivorship bias. We assign each company to one of 12 sectors using the Fama--French industry classification mapped from 4-digit SIC codes.
+
+The resulting universe contains approximately 8{,}000 unique companies. Each company-year observation is identified by its CIK (Central Index Key), ticker symbol, fiscal year, fiscal period end date, and 10-K filing date.
+
+\subsection{XBRL Feature Extraction}
+\label{sec:xbrl}
+
+We extract 16 financial features per company-year from the EDGAR Company Facts API,\footnote{\url{https://data.sec.gov/api/xbrl/companyfacts/CIK\{cik\}.json}} which provides structured XBRL data tagged with US-GAAP taxonomy concepts. For each target feature, we define an ordered list of candidate XBRL concept tags (e.g., \texttt{us-gaap:Assets}, \texttt{us-gaap:AssetsCurrent}) and resolve to the first available tag, accommodating variation in reporting practices across companies.
+
+We restrict extraction to annual (10-K / FY) filings. When multiple filings exist for the same company-year (e.g., due to amendments), we deduplicate by retaining the most recently filed version. All HTTP responses are cached to disk per CIK, and requests are rate-limited to $\leq$10 per second in compliance with SEC EDGAR fair-use policies.
+
+The 16 raw features span three financial statement categories:
+
+\paragraph{Balance sheet (8 features).} Total assets, total liabilities, stockholders' equity, current assets, current liabilities, retained earnings, cash and cash equivalents, and total debt (computed as the sum of long-term and short-term debt when reported separately).
+
+\paragraph{Income statement (5 features).} Total revenue, cost of goods sold, operating income, net income, and interest expense.
+
+\paragraph{Cash flow statement (3 features).} Cash from operations, cash from investing activities, and cash from financing activities.
+
+\subsection{Feature Engineering}
+\label{sec:features}
+
+From the 16 raw XBRL features, we derive two additional feature sets:
+
+\paragraph{Financial ratios (12 features).} We compute standard financial ratios spanning four categories: leverage (debt-to-equity, debt-to-assets, interest coverage, CFO-to-debt), liquidity (current ratio, quick ratio), profitability (return on assets, return on equity, gross margin, operating margin, net profit margin), and distress (Altman Z-score). The \citet{altman1968financial} Z-score is computed using the original 5-component formula:
+\begin{equation}
+  Z = 1.2\,X_1 + 1.4\,X_2 + 3.3\,X_3 + 0.6\,X_4 + 1.0\,X_5
+  \label{eq:altman}
+\end{equation}
+where $X_1 = \text{working capital} / \text{total assets}$, $X_2 = \text{retained earnings} / \text{total assets}$, $X_3 = \text{operating income} / \text{total assets}$, $X_4 = \text{equity} / \text{total liabilities}$, and $X_5 = \text{revenue} / \text{total assets}$. All divisions use a minimum absolute denominator threshold of $10^{-8}$ to avoid numerical instability, returning NaN where the denominator is effectively zero.
+
+\paragraph{Year-over-year changes (5 features).} For each of total revenue, net income, total assets, total debt, and cash from operations, we compute the year-over-year percentage change as $(x_t - x_{t-1}) / |x_{t-1}|$. Using the absolute value of the prior-year value in the denominator handles sign changes (e.g., a firm moving from negative to positive net income). The first observation per company is NaN by construction.
+
+\paragraph{Missingness indicators.} For each numeric feature retained after coverage pruning, we add a binary indicator variable equal to~1 if the original value was missing and~0 otherwise. These flags are not normalized.
+
+The default configuration uses all feature groups (raw + ratios + YoY + missingness flags), yielding up to 33 numeric features plus their corresponding missingness indicators.
+
+\subsection{Feature Normalization}
+\label{sec:normalization}
+
+Financial features exhibit extreme tail behavior that renders standard z-score normalization unreliable. We apply a three-stage normalization pipeline, fit exclusively on the training split to prevent look-ahead bias:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Median imputation.} Missing values are replaced with the per-feature median computed on the training split.
+
+  \item \textbf{Winsorization.} Values are clipped to the 1st and 99th percentile bounds computed on the training split, attenuating the influence of extreme outliers.
+
+  \item \textbf{Quantile transformation.} We apply scikit-learn's \texttt{QuantileTransformer} with \texttt{output\_distribution='normal'} and up to 1{,}000 quantiles (minimum~2), which maps the empirical rank distribution of each feature to a standard normal distribution. This is the default normalization method; z-score standardization is available as an alternative.
+\end{enumerate}
+
+Features with less than 50\% non-null coverage in the training split are pruned before normalization. This threshold is applied at the training-split level to prevent information leakage from the validation or test periods.
+
+\subsection{Market Data}
+\label{sec:market}
+
+We collect daily adjusted OHLCV (open, high, low, close, volume) price data via yfinance for all tickers in the company universe, covering the period 2010-01-01 through 2024-12-31. The 2010 start date provides a two-year price history buffer before the first fiscal year in our sample (2012).
+
+For each company-year observation, we align market data to the 10-K filing date and compute forward returns at four horizons: 21, 63, 126, and 252 trading days. Returns are market-adjusted by subtracting the corresponding S\&P~500 (\^{}GSPC) return over the same window, and sector-adjusted using Fama--French 12-industry sector ETF returns. We compute 63-day average daily volume preceding the filing date as an additional feature. Companies with insufficient post-filing price data (indicating delisting) are flagged.
+
+\subsection{Distress Labels}
+\label{sec:labels}
+
+We construct five binary distress outcome labels per company-year, covering distinct dimensions of financial distress. Labels are assigned based on events occurring within a 365-day horizon following the fiscal period end date. Label columns use nullable Int8 dtype, where 0 indicates no event, 1 indicates a distress event, and NaN indicates that the label is unavailable for that observation (not equivalent to a negative label).
+
+\begin{table}[ht]
+  \centering
+  \caption{Distress outcome definitions.}
+  \label{tab:labels}
+  \small
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Outcome & Source & Definition \\
+    \midrule
+    \texttt{stock\_decline} & Market data (computed) & Market-adj.\ 252-day return $< -20\%$ \\
+    \texttt{earnings\_restate} & EDGAR filing index & 10-K/A amendment filed within horizon \\
+    \texttt{sec\_enforcement} & Dechow et al.\ AAER database & SEC enforcement release within horizon \\
+    \texttt{bankruptcy} & UCLA-LoPucki BRD / Compustat & Chapter~7 or 11 filing within horizon \\
+    \texttt{audit\_qualification} & Audit Analytics (deferred) & Going-concern or adverse opinion \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The first two outcomes (\texttt{stock\_decline} and \texttt{earnings\_restate}) are derived entirely from publicly available EDGAR data. The remaining three require external datasets: the Dechow et al.\ AAER database for SEC enforcement actions, the UCLA-LoPucki Bankruptcy Research Database for bankruptcy filings, and Audit Analytics for audit opinions. When external label files are not present, the corresponding label columns are all-NaN and the outcome is excluded from evaluation. Delisted companies with insufficient post-filing price data are treated as stock decline events.
+
+\todo{Update with final label coverage statistics once ATS-172 is complete.}

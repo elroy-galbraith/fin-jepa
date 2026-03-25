@@ -1,0 +1,55 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{FT-Transformer}
+\label{sec:ft_transformer}
+
+We adopt the FT-Transformer architecture of \citet{gorishniy2021revisiting} as our primary encoder for structured financial data. The architecture consists of three components:
+
+\paragraph{Feature Tokenizer.} Each scalar input feature $x_i$ is projected to a $d$-dimensional token embedding via a per-feature affine transformation: $\mathbf{t}_i = \mathbf{W}_i x_i + \mathbf{b}_i$, where $\mathbf{W}_i \in \mathbb{R}^d$ and $\mathbf{b}_i \in \mathbb{R}^d$ are learnable parameters. Feature weights are initialized with Kaiming uniform initialization ($a = \sqrt{5}$). A learnable \textsc{[CLS]} token $\mathbf{t}_{\mathrm{cls}} \in \mathbb{R}^d$ is prepended to the token sequence, yielding a sequence of $n + 1$ tokens where $n$ is the number of input features.
+
+\paragraph{Transformer Encoder.} The token sequence is processed by a stack of $L$ standard Transformer encoder layers \citep{vaswani2017attention}. Each layer applies multi-head self-attention followed by a position-wise feed-forward network, with pre-layer normalization (norm-first configuration). The feed-forward hidden dimension is set to $d \times f$ where $f$ is a configurable expansion factor. We use PyTorch's \texttt{nn.TransformerEncoderLayer} with batch-first processing.
+
+\paragraph{Classification Head.} The \textsc{[CLS]} token representation from the final encoder layer is passed through a classification head consisting of LayerNorm $\rightarrow$ ReLU $\rightarrow$ Linear, producing a single logit for binary classification. The model is trained with binary cross-entropy with logits loss (\texttt{BCEWithLogitsLoss}).
+
+Default hyperparameters: $d = 192$ (token dimension), $h = 8$ (attention heads), $L = 3$ (layers), $f = 4$ (FFN expansion factor), dropout $= 0.0$. These follow the recommendations in \citet{gorishniy2021revisiting} for medium-sized tabular datasets.
+
+\subsection{Baseline Models}
+\label{sec:baselines}
+
+We compare the FT-Transformer against three baseline models spanning classical and ensemble approaches:
+
+\paragraph{Logistic Regression (LR).} An L2-regularized logistic regression with balanced class weighting, preceded by standard scaling (scikit-learn \texttt{StandardScaler} $\rightarrow$ \texttt{LogisticRegression}). Regularization strength $C = 1.0$, solver = L-BFGS, maximum 1{,}000 iterations. We evaluate two feature configurations: LR-full (all engineered features) and LR-traditional (10 traditional financial ratios only: Altman Z-score, current ratio, quick ratio, debt-to-equity, debt-to-assets, ROA, ROE, net profit margin, interest coverage, and CFO-to-debt).
+
+\paragraph{XGBoost.} Extreme gradient-boosted trees \citep{chen2016xgboost} with 500 estimators, learning rate 0.05, max depth~6, subsample ratio 0.8, column subsample ratio 0.8. Evaluation metric: AUC.
+
+\paragraph{Histogram Gradient-Boosted Trees (GBT).} Scikit-learn's \texttt{HistGradientBoostingClassifier} with 500 iterations, learning rate 0.05, max depth~6, minimum 20 samples per leaf, balanced class weighting. This model natively handles NaN values, making it suitable for evaluation on raw XBRL features with minimal preprocessing.
+
+All baseline hyperparameters use default (untuned) values for the initial benchmark. Optional Optuna-based temporal cross-validation tuning is supported (30 trials, 3-fold expanding-window CV) but is disabled in the default configuration.
+
+\subsection{Self-Supervised Pretraining}
+\label{sec:ssl}
+
+We investigate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer, analogous to masked language modeling \citep{devlin2019bert} applied to tabular features.
+
+\paragraph{Masking strategy.} For each training sample, a fraction $r$ of input features are independently selected for masking via Bernoulli sampling. Masked feature values are replaced with zero in the input. We experiment with mask ratios $r \in \{0.15, 0.30, 0.50\}$.
+
+\paragraph{Reconstruction head.} A two-layer MLP reconstructs all $n$ feature values from the \textsc{[CLS]} token representation: $\text{Linear}(d, 2d) \rightarrow \text{GELU} \rightarrow \text{Linear}(2d, n)$. The reconstruction loss is computed as the mean squared error over masked positions only:
+\begin{equation}
+  \mathcal{L}_{\text{SSL}} = \frac{\sum_{i \in M} (\hat{x}_i - x_i)^2}{|M|}
+  \label{eq:ssl_loss}
+\end{equation}
+where $M$ is the set of masked feature indices and $\hat{x}_i$ is the predicted value for feature~$i$.
+
+\paragraph{Pretraining protocol.} The FT-Transformer encoder and reconstruction head are trained jointly for 200 epochs with a batch size of 512. We use AdamW optimization with learning rate $10^{-4}$ and weight decay $10^{-5}$. The learning rate follows a linear warmup over 10 epochs followed by cosine annealing to zero. Pretraining uses all available training-split data regardless of label availability.
+
+\paragraph{Fine-tuning.} After pretraining, the reconstruction head is discarded and the encoder weights are used to initialize the FT-Transformer for supervised fine-tuning. Fine-tuning uses the same protocol as training from scratch (\Cref{sec:training}).
+
+\subsection{Training Protocol}
+\label{sec:training}
+
+\paragraph{FT-Transformer training.} Batch size 256, maximum 100 epochs, AdamW optimizer with learning rate $10^{-4}$ and weight decay $10^{-5}$. Early stopping with patience 10 epochs on validation AUROC. Gradient norms are clipped to 1.0. Predictions are obtained by applying sigmoid to model logits.
+
+\paragraph{Baseline training.} Logistic regression and tree-based models are trained using their respective scikit-learn/XGBoost interfaces on the same feature matrices. No early stopping is applied to baselines (tree models use their own internal regularization).
+
+\paragraph{Reproducibility.} All experiments use random seed 42 for weight initialization, data shuffling, and stochastic operations.

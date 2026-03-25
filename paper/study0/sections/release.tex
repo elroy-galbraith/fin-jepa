@@ -1,0 +1,13 @@
+\section{Open-Source Release}
+\label{sec:release}
+
+We release the following artifacts alongside this report:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{EDGAR XBRL extraction pipeline}---automated download and parsing of Company Facts API data for the full SEC filer universe.
+  \item \textbf{Feature definitions and normalization code}---16 raw features, 12 financial ratios, 5 YoY changes, with configurable winsorization and quantile normalization.
+  \item \textbf{Company universe and split specifications}---survivorship-bias-free universe construction and reproducible temporal split definitions.
+  \item \textbf{Training and evaluation scripts}---FT-Transformer, baseline models, SSL pretraining, and the full evaluation harness with all reported metrics.
+\end{enumerate}
+
+Code repository: \url{https://github.com/elroy-galbraith/fin-jepa.git}

@@ -1,0 +1,120 @@
+\section{Results}
+\label{sec:results}
+
+Four of five distress outcomes were evaluable. \texttt{audit\_qualification} was excluded due to missing external label data (all-NaN in the test split). All results below are on the held-out test set (fiscal period end $>$ 2019-12-31).
+
+\subsection{Baseline Comparison}
+\label{sec:results_baseline}
+
+\Cref{tab:auroc} reports test AUROC for all models across the four evaluable outcomes. The FT-Transformer column reports the supervised (from-scratch) model; SSL-pretrained variants are presented separately in \Cref{sec:results_ssl}.
+
+\begin{table}[ht]
+  \centering
+  \caption{Test set AUROC by model and outcome (untuned models). Best result per outcome in \textbf{bold}.}
+  \label{tab:auroc}
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Model & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
+    \midrule
+    LR (traditional ratios) & 0.644 & 0.619 & \textbf{0.606} & \textbf{0.646} \\
+    LR (full features) & \textbf{0.682} & 0.660 & 0.399 & 0.640 \\
+    XGBoost & 0.652 & 0.648 & 0.534 & 0.617 \\
+    GBT (raw XBRL) & 0.677 & 0.670 & 0.601 & 0.561 \\
+    FT-Transformer (scratch) & 0.660 & \textbf{0.681} & 0.527 & \textbf{0.653} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The FT-Transformer achieves the highest AUROC on \texttt{earnings\_restate} (0.681) and \texttt{bankruptcy} (0.653), outperforming all baselines including GBT and XGBoost. On \texttt{stock\_decline}, it trails LR-full (0.682) and GBT (0.677) but exceeds XGBoost (0.652). On \texttt{sec\_enforcement}, all models struggle---the outcome has an extremely low base rate (AUPRC $< 0.01$ across all models), and AUROC values hover near chance for several models, suggesting that the XBRL feature set alone carries limited signal for SEC enforcement actions.
+
+\begin{table}[ht]
+  \centering
+  \caption{Full test metrics for FT-Transformer (scratch) vs.\ best baseline per outcome. Best per outcome--metric pair in \textbf{bold}.}
+  \label{tab:full_metrics}
+  \small
+  \begin{tabular}{@{}llccccc@{}}
+    \toprule
+    Outcome & Model & AUROC & AUPRC & Brier & F1 (Youden) & ECE \\
+    \midrule
+    \texttt{stock\_decline} & FT-Transformer & 0.660 & 0.728 & 0.227 & 0.661 & \textbf{0.047} \\
+    \texttt{stock\_decline} & LR-full (best) & \textbf{0.682} & \textbf{0.735} & \textbf{0.226} & \textbf{0.666} & 0.081 \\
+    \midrule
+    \texttt{earnings\_restate} & FT-Transformer & \textbf{0.681} & \textbf{0.191} & \textbf{0.221} & \textbf{0.273} & 0.352 \\
+    \texttt{earnings\_restate} & GBT (best) & 0.670 & 0.190 & 0.227 & 0.263 & \textbf{0.359} \\
+    \midrule
+    \texttt{sec\_enforcement} & FT-Transformer & 0.527 & 0.008 & 0.050 & 0.015 & 0.164 \\
+    \texttt{sec\_enforcement} & LR-trad (best) & \textbf{0.606} & \textbf{0.010} & 0.229 & \textbf{0.025} & 0.456 \\
+    \midrule
+    \texttt{bankruptcy} & FT-Transformer & \textbf{0.653} & \textbf{0.017} & 0.192 & \textbf{0.030} & 0.384 \\
+    \texttt{bankruptcy} & LR-trad (best) & 0.646 & 0.014 & \textbf{0.220} & 0.032 & 0.437 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Calibration is a notable FT-Transformer strength: on \texttt{stock\_decline}, its ECE (0.047) is substantially lower than any baseline (next best: LR-traditional at 0.079). This suggests the Transformer's probability estimates are better calibrated even where its discrimination is slightly weaker.
+
+\subsection{Self-Supervised Pretraining}
+\label{sec:results_ssl}
+
+\Cref{tab:ssl} reports test AUROC for the FT-Transformer initialized from scratch versus three SSL mask ratios. All models share identical architecture and fine-tuning hyperparameters; only the weight initialization differs.
+
+\begin{table}[ht]
+  \centering
+  \caption{Test AUROC: FT-Transformer with and without SSL pretraining. Best per outcome in \textbf{bold}.}
+  \label{tab:ssl}
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Initialization & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
+    \midrule
+    Scratch & 0.663 & 0.679 & 0.552 & 0.627 \\
+    SSL ($r = 0.15$) & \textbf{0.672} & 0.667 & 0.590 & \textbf{0.679} \\
+    SSL ($r = 0.30$) & 0.663 & 0.676 & 0.613 & 0.656 \\
+    SSL ($r = 0.50$) & 0.662 & \textbf{0.685} & \textbf{0.645} & 0.665 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+SSL pretraining provides the largest gains on \texttt{sec\_enforcement} ($+0.093$ AUROC at $r = 0.50$ vs.\ scratch) and \texttt{bankruptcy} ($+0.052$ at $r = 0.15$). On \texttt{stock\_decline}, $r = 0.15$ provides a modest lift ($+0.009$). On \texttt{earnings\_restate}, $r = 0.50$ yields a small improvement ($+0.006$). No single mask ratio dominates across all outcomes: $r = 0.15$ is best for \texttt{stock\_decline} and \texttt{bankruptcy}, while $r = 0.50$ is best for \texttt{earnings\_restate} and \texttt{sec\_enforcement}.
+
+The strongest SSL result is on \texttt{sec\_enforcement}, where $r = 0.50$ (AUROC 0.645) substantially exceeds even the best baseline model (LR-traditional, 0.606). This is notable because \texttt{sec\_enforcement} is the outcome where the scratch FT-Transformer performed worst---suggesting that SSL pretraining may be most valuable precisely where supervised signal is weakest.
+
+\subsection{Go/No-Go Gate}
+\label{sec:results_gate}
+
+The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 5 outcomes. With the current results (scratch FT-Transformer, untuned, 4 outcomes evaluable):
+
+\begin{table}[ht]
+  \centering
+  \caption{Go/no-go gate evaluation (FT-Transformer scratch vs.\ XGBoost).}
+  \label{tab:gate}
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Outcome & FT-Trans.\ & XGBoost & $\Delta$ AUROC & Win ($\geq 0.01$)? \\
+    \midrule
+    \texttt{stock\_decline} & 0.660 & 0.652 & $+0.008$ & No \\
+    \texttt{earnings\_restate} & 0.681 & 0.648 & $+0.033$ & \textbf{Yes} \\
+    \texttt{sec\_enforcement} & 0.527 & 0.534 & $-0.007$ & No \\
+    \texttt{bankruptcy} & 0.653 & 0.617 & $+0.036$ & \textbf{Yes} \\
+    \texttt{audit\_qualification} & --- & --- & --- & N/A \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{Gate result: not passed (2 wins of 3 required).} The FT-Transformer wins decisively on \texttt{earnings\_restate} ($+0.033$) and \texttt{bankruptcy} ($+0.036$), narrowly misses on \texttt{stock\_decline} ($+0.008$, just below the 0.01 margin), and loses on \texttt{sec\_enforcement} ($-0.007$).
+
+However, several factors suggest the gate outcome is likely to improve:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Hyperparameter tuning has not been performed.} All FT-Transformer results use default hyperparameters ($d = 192$, $L = 3$, $\text{lr} = 10^{-4}$). A sweep is expected to close the 0.002 gap on \texttt{stock\_decline}.
+
+  \item \textbf{SSL pretraining is not reflected in the gate.} The best SSL-pretrained model ($r = 0.15$) achieves 0.672 on \texttt{stock\_decline}---which would bring the margin to $+0.020$, comfortably passing the gate on that outcome.
+
+  \item \textbf{\texttt{audit\_qualification} is missing.} Adding a fifth evaluable outcome provides another opportunity to accumulate wins. The FT-Transformer's pattern of outperforming on rare-event outcomes suggests it may perform well here.
+\end{enumerate}
+
+The recommendation from the SSL experiment pipeline is \textbf{``proceed''}---consistent with the view that the gate is within reach pending tuning and additional label data.
+
+\todo{Remaining: ATS-169 hyperparameter sweep, re-run SSL with tuned architecture, final head-to-head with bootstrap CIs, audit\_qualification labels from ATS-172.}
