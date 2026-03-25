@@ -16,6 +16,7 @@ features:
   use_raw: true
   use_ratios: true
   use_yoy: true
+  use_sic: true
   use_missingness_flags: true
   coverage_threshold: 0.50
   normalization_method: "quantile"

@@ -12,6 +12,9 @@ import pandas as pd
 import pytest
 
 from fin_jepa.data.feature_engineering import (
+    CATEGORICAL_FEATURES,
+    IS_FIRST_YEAR_COL,
+    N_SECTORS,
     RATIO_FEATURES,
     RAW_FEATURES,
     YOY_BASE_FEATURES,
@@ -26,8 +29,10 @@ from fin_jepa.data.feature_engineering import (
     compute_yoy_changes,
     coverage_report,
     fit_scaler,
+    join_sic_code,
     prune_low_coverage,
 )
+from fin_jepa.data.sector_map import FF12_SECTORS
 from fin_jepa.data.splits import SplitConfig
 
 
@@ -208,13 +213,15 @@ class TestComputeYoYChanges:
     def test_basic_yoy(self):
         df = _make_xbrl_df(n_companies=1, n_years=2)
         result = compute_yoy_changes(df, ["total_revenue"])
-        # First year should be NaN
-        assert np.isnan(result["total_revenue_yoy"].iloc[0])
+        # First year: is_first_year=1, yoy=0.0 (zero-filled)
+        assert result["total_revenue_yoy"].iloc[0] == pytest.approx(0.0)
+        assert result[IS_FIRST_YEAR_COL].iloc[0] == 1
         # Second year should have the correct change
         rev0 = df.iloc[0]["total_revenue"]
         rev1 = df.iloc[1]["total_revenue"]
         expected = (rev1 - rev0) / abs(rev0)
         assert result["total_revenue_yoy"].iloc[1] == pytest.approx(expected)
+        assert result[IS_FIRST_YEAR_COL].iloc[1] == 0
 
     def test_negative_base(self):
         df = _make_xbrl_df(n_companies=1, n_years=2)
@@ -223,39 +230,76 @@ class TestComputeYoYChanges:
         # (-50 - (-100)) / |-100| = 50/100 = 0.5
         assert result["net_income_yoy"].iloc[1] == pytest.approx(0.5)
 
-    def test_zero_prior_gives_nan(self):
+    def test_zero_prior_gives_zero_for_first_year(self):
         df = _make_xbrl_df(n_companies=1, n_years=2)
         df["total_revenue"] = [0.0, 100.0]
         result = compute_yoy_changes(df, ["total_revenue"])
+        # First year zero-filled, second year has zero prior → NaN from
+        # division but not first-year, so it stays NaN (zero prior edge case)
+        assert result["total_revenue_yoy"].iloc[0] == pytest.approx(0.0)
+        # Zero base in a non-first year remains NaN (not zero-filled)
         assert np.isnan(result["total_revenue_yoy"].iloc[1])
 
     def test_multiple_companies(self):
         df = _make_xbrl_df(n_companies=2, n_years=2)
         result = compute_yoy_changes(df, ["total_assets"])
-        # Each company's first year should be NaN
+        # Each company's first year should be zero-filled with is_first_year=1
         for cik in df["cik"].unique():
             mask = result["cik"] == cik
             group = result[mask].sort_values("fiscal_year")
-            assert np.isnan(group["total_assets_yoy"].iloc[0])
-            assert not np.isnan(group["total_assets_yoy"].iloc[1])
+            assert group["total_assets_yoy"].iloc[0] == pytest.approx(0.0)
+            assert group[IS_FIRST_YEAR_COL].iloc[0] == 1
+            assert group[IS_FIRST_YEAR_COL].iloc[1] == 0
 
     def test_column_naming(self):
         df = _make_xbrl_df(n_companies=1, n_years=2)
         result = compute_yoy_changes(df, ["total_revenue", "net_income"])
         assert "total_revenue_yoy" in result.columns
         assert "net_income_yoy" in result.columns
+        assert IS_FIRST_YEAR_COL in result.columns
 
     def test_missing_feature_column(self):
         df = _make_xbrl_df(n_companies=1, n_years=2)
         result = compute_yoy_changes(df, ["nonexistent_col"])
         assert "nonexistent_col_yoy" in result.columns
-        assert result["nonexistent_col_yoy"].isna().all()
+        # Missing columns produce NaN for all rows; first-year zero-fill
+        # applies only where is_first_year=1
+        assert result["nonexistent_col_yoy"].iloc[0] == pytest.approx(0.0)
 
-    def test_default_features(self):
+    def test_default_features_all_raw(self):
+        """YOY_BASE_FEATURES should include all 20 raw XBRL features."""
         df = _make_xbrl_df(n_companies=1, n_years=2)
         result = compute_yoy_changes(df)
+        assert YOY_BASE_FEATURES == list(RAW_FEATURES)
         for col in YOY_BASE_FEATURES:
             assert f"{col}_yoy" in result.columns
+
+    def test_year_gap_detection(self):
+        """Companies with fiscal-year gaps get is_first_year=1 for the gap row."""
+        df = pd.DataFrame({
+            "cik": ["0000000001"] * 3,
+            "ticker": ["A"] * 3,
+            "fiscal_year": [2015, 2017, 2018],  # gap at 2016
+            "period_end": [date(2015, 12, 31), date(2017, 12, 31), date(2018, 12, 31)],
+            "filed_date": [date(2016, 2, 15), date(2018, 2, 15), date(2019, 2, 15)],
+            "total_revenue": [100.0, 120.0, 130.0],
+        })
+        result = compute_yoy_changes(df, ["total_revenue"])
+        # 2015: first observation → is_first_year=1
+        assert result.iloc[0][IS_FIRST_YEAR_COL] == 1
+        assert result.iloc[0]["total_revenue_yoy"] == pytest.approx(0.0)
+        # 2017: gap (2017 - 2015 = 2 > 1) → is_first_year=1
+        assert result.iloc[1][IS_FIRST_YEAR_COL] == 1
+        assert result.iloc[1]["total_revenue_yoy"] == pytest.approx(0.0)
+        # 2018: consecutive → is_first_year=0, normal YoY
+        assert result.iloc[2][IS_FIRST_YEAR_COL] == 0
+        expected = (130.0 - 120.0) / 120.0
+        assert result.iloc[2]["total_revenue_yoy"] == pytest.approx(expected)
+
+    def test_is_first_year_dtype(self):
+        df = _make_xbrl_df(n_companies=1, n_years=2)
+        result = compute_yoy_changes(df)
+        assert result[IS_FIRST_YEAR_COL].dtype == np.int8
 
 
 # ---------------------------------------------------------------------------
@@ -480,11 +524,13 @@ class TestBuildFeatureMatrix:
 
     def test_end_to_end(self):
         df = _make_xbrl_df(n_companies=3, n_years=4, start_year=2015)
-        splits, scaler, features = build_feature_matrix(df)
+        splits, scaler, features, cat_cols = build_feature_matrix(df)
         assert "train" in splits
         assert isinstance(scaler, FeatureScaler)
         assert scaler._fitted
         assert len(features) > 0
+        # No universe_df → no categorical cols
+        assert cat_cols == []
 
     def test_with_splits(self):
         df = _make_xbrl_df(n_companies=3, n_years=6, start_year=2015)
@@ -493,7 +539,9 @@ class TestBuildFeatureMatrix:
             val_end="2019-12-31",
             test_end="2023-12-31",
         )
-        splits, scaler, features = build_feature_matrix(df, split_config=split_cfg)
+        splits, scaler, features, _cat_cols = build_feature_matrix(
+            df, split_config=split_cfg,
+        )
         assert "train" in splits
         assert "val" in splits
         assert "test" in splits
@@ -507,14 +555,15 @@ class TestBuildFeatureMatrix:
             use_raw=True,
             use_ratios=True,
             use_yoy=True,
+            use_sic=False,  # no universe_df for this test
             use_missingness_flags=True,
             coverage_threshold=0.0,  # keep everything
         )
-        _, _, features = build_feature_matrix(df, feature_config=config)
-        # 16 raw + 9 ratios + 5 yoy = 30 numeric features
-        # + 30 missingness flags = 60 total
+        _, _, features, _cat_cols = build_feature_matrix(df, feature_config=config)
+        # 20 raw + 12 ratios + 20 yoy = 52 numeric features
+        # + 52 missingness flags + 1 is_first_year = 105 total
         n_numeric = len(RAW_FEATURES) + len(RATIO_FEATURES) + len(YOY_FEATURES)
-        expected = n_numeric * 2  # numeric + flags
+        expected = n_numeric * 2 + 1  # numeric + flags + is_first_year
         assert len(features) == expected
 
     def test_config_disables_ratios(self):
@@ -522,10 +571,11 @@ class TestBuildFeatureMatrix:
         config = FeatureConfig(
             use_ratios=False,
             use_yoy=False,
+            use_sic=False,
             use_missingness_flags=False,
             coverage_threshold=0.0,
         )
-        _, _, features = build_feature_matrix(df, feature_config=config)
+        _, _, features, _cat_cols = build_feature_matrix(df, feature_config=config)
         for ratio in RATIO_FEATURES:
             assert ratio not in features
         for yoy in YOY_FEATURES:
@@ -535,12 +585,14 @@ class TestBuildFeatureMatrix:
         df = _make_xbrl_df(n_companies=2, n_years=2)
         config = FeatureConfig(
             use_yoy=False,
+            use_sic=False,
             use_missingness_flags=False,
             coverage_threshold=0.0,
         )
-        _, _, features = build_feature_matrix(df, feature_config=config)
+        _, _, features, _cat_cols = build_feature_matrix(df, feature_config=config)
         for yoy in YOY_FEATURES:
             assert yoy not in features
+        assert IS_FIRST_YEAR_COL not in features
         # Ratios should still be present
         for ratio in RATIO_FEATURES:
             assert ratio in features
@@ -557,7 +609,7 @@ class TestBuildFeatureMatrix:
             val_end="2019-12-31",
             test_end="2023-12-31",
         )
-        splits, scaler, _ = build_feature_matrix(df, split_config=split_cfg)
+        splits, scaler, _, _cat_cols = build_feature_matrix(df, split_config=split_cfg)
 
         # Scaler medians should come from train only (not influenced by val)
         train_only = df[df["fiscal_year"] <= 2017]
@@ -567,16 +619,92 @@ class TestBuildFeatureMatrix:
 
     def test_no_nan_in_output(self):
         df = _make_xbrl_df(n_companies=3, n_years=4, inject_nans=True)
-        config = FeatureConfig(coverage_threshold=0.0)
-        splits, _, features = build_feature_matrix(df, feature_config=config)
+        config = FeatureConfig(coverage_threshold=0.0, use_sic=False)
+        splits, _, features, _cat_cols = build_feature_matrix(
+            df, feature_config=config,
+        )
         # After imputation, numeric features should have no NaN
-        numeric_feats = [f for f in features if not f.endswith("_missing")]
+        numeric_feats = [
+            f for f in features
+            if not f.endswith("_missing") and f != IS_FIRST_YEAR_COL
+        ]
         for key, split_df in splits.items():
             for col in numeric_feats:
                 if col in split_df.columns:
                     assert not split_df[col].isna().any(), (
                         f"NaN found in {key}[{col}]"
                     )
+
+    def test_is_first_year_not_normalised(self):
+        """is_first_year should remain binary {0, 1} after build_feature_matrix."""
+        df = _make_xbrl_df(n_companies=2, n_years=3, start_year=2015)
+        config = FeatureConfig(coverage_threshold=0.0, use_sic=False)
+        splits, _, features, _ = build_feature_matrix(df, feature_config=config)
+        assert IS_FIRST_YEAR_COL in features
+        for split_df in splits.values():
+            vals = set(split_df[IS_FIRST_YEAR_COL].unique())
+            assert vals <= {0, 1}
+
+    def test_sic_join_with_universe(self):
+        """When universe_df is provided, sector_idx appears as categorical."""
+        df = _make_xbrl_df(n_companies=2, n_years=2, start_year=2015)
+        universe = pd.DataFrame({
+            "cik": [f"{(i+1):010d}" for i in range(2)],
+            "sic_code": ["7372", "6022"],  # Business Equipment, Finance
+        })
+        config = FeatureConfig(
+            use_sic=True, use_ratios=False, use_yoy=False,
+            use_missingness_flags=False, coverage_threshold=0.0,
+        )
+        splits, _, features, cat_cols = build_feature_matrix(
+            df, feature_config=config, universe_df=universe,
+        )
+        assert cat_cols == ["sector_idx"]
+        assert "sector_idx" not in features  # not in continuous features
+        # sector_idx should exist in the DataFrame
+        assert "sector_idx" in splits["train"].columns
+        # Values should be valid FF12 indices (0–11)
+        for split_df in splits.values():
+            assert split_df["sector_idx"].between(0, N_SECTORS - 1).all()
+
+
+# ---------------------------------------------------------------------------
+# TestJoinSicCode
+# ---------------------------------------------------------------------------
+
+class TestJoinSicCode:
+
+    def test_basic_join(self):
+        df = pd.DataFrame({"cik": ["0000000001", "0000000002"], "val": [1.0, 2.0]})
+        universe = pd.DataFrame({
+            "cik": ["0000000001", "0000000002"],
+            "sic_code": ["7372", "6022"],
+        })
+        result = join_sic_code(df, universe)
+        assert "sic_code" in result.columns
+        assert "sector_idx" in result.columns
+        # 7372 → Business Equipment (index 5)
+        assert result.iloc[0]["sector_idx"] == FF12_SECTORS.index("Business Equipment")
+        # 6022 → Finance (index 10)
+        assert result.iloc[1]["sector_idx"] == FF12_SECTORS.index("Finance")
+
+    def test_missing_sic_maps_to_other(self):
+        df = pd.DataFrame({"cik": ["0000000001"], "val": [1.0]})
+        universe = pd.DataFrame({"cik": ["0000000001"], "sic_code": [None]})
+        result = join_sic_code(df, universe)
+        assert result.iloc[0]["sector_idx"] == FF12_SECTORS.index("Other")
+
+    def test_unknown_cik_maps_to_other(self):
+        df = pd.DataFrame({"cik": ["9999999999"], "val": [1.0]})
+        universe = pd.DataFrame({"cik": ["0000000001"], "sic_code": ["7372"]})
+        result = join_sic_code(df, universe)
+        assert result.iloc[0]["sector_idx"] == FF12_SECTORS.index("Other")
+
+    def test_sector_idx_is_int(self):
+        df = pd.DataFrame({"cik": ["0000000001"], "val": [1.0]})
+        universe = pd.DataFrame({"cik": ["0000000001"], "sic_code": ["7372"]})
+        result = join_sic_code(df, universe)
+        assert result["sector_idx"].dtype in (np.int32, np.int64, int)
 
 
 # ---------------------------------------------------------------------------

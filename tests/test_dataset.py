@@ -38,6 +38,28 @@ class TestTabularDataset:
         assert x[0].item() == 0.0
         assert x[2].item() == 0.0
 
+    def test_shapes_with_categoricals_and_labels(self):
+        features = np.random.randn(10, 5).astype(np.float32)
+        labels = np.random.randint(0, 2, size=10).astype(np.float32)
+        cat_features = np.random.randint(0, 12, size=(10, 1)).astype(np.int64)
+        ds = TabularDataset(features, labels, cat_features)
+
+        assert len(ds) == 10
+        x, x_cat, y = ds[0]
+        assert x.shape == (5,)
+        assert x_cat.shape == (1,)
+        assert x_cat.dtype == torch.int64
+        assert y.shape == ()
+
+    def test_shapes_with_categoricals_no_labels(self):
+        features = np.random.randn(10, 5).astype(np.float32)
+        cat_features = np.random.randint(0, 12, size=(10, 1)).astype(np.int64)
+        ds = TabularDataset(features, labels=None, cat_features=cat_features)
+
+        x, x_cat = ds[0]
+        assert x.shape == (5,)
+        assert x_cat.shape == (1,)
+
 
 class TestMakeDataloader:
     def _make_df(self):
@@ -70,3 +92,29 @@ class TestMakeDataloader:
         loader = make_dataloader(df, ["f1"], "label", batch_size=32, shuffle=False)
         total = sum(x.shape[0] for x, _ in loader)
         assert total == 100
+
+    def test_with_cat_feature_cols(self):
+        df = pd.DataFrame({
+            "f1": [1.0, 2.0, 3.0],
+            "sector_idx": [0, 5, 11],
+            "label": [1.0, 0.0, 1.0],
+        })
+        loader = make_dataloader(
+            df, ["f1"], "label", batch_size=10, shuffle=False,
+            cat_feature_cols=["sector_idx"],
+        )
+        x, x_cat, y = next(iter(loader))
+        assert x.shape == (3, 1)
+        assert x_cat.shape == (3, 1)
+        assert x_cat.dtype == torch.int64
+        assert y.shape == (3,)
+
+    def test_no_cat_cols_backward_compat(self):
+        df = pd.DataFrame({
+            "f1": [1.0, 2.0],
+            "label": [1.0, 0.0],
+        })
+        loader = make_dataloader(df, ["f1"], "label", batch_size=10, shuffle=False)
+        x, y = next(iter(loader))
+        assert x.shape == (2, 1)
+        assert y.shape == (2,)

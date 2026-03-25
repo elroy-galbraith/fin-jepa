@@ -4,19 +4,28 @@ Transforms raw XBRL line items into a model-ready feature matrix for both
 baseline models (logistic regression, XGBoost) and the FT-Transformer.
 
 Pipeline steps (executed by :func:`build_feature_matrix`):
-  1. Compute standard financial ratios from raw XBRL columns
-  2. Compute year-over-year percentage changes for key items
-  3. Prune features below a coverage threshold (fit on train split)
-  4. Add binary missingness indicator flags
-  5. Fit a robust normalisation scaler on the train split
-  6. Transform all splits (train / val / test)
+  1. Join SIC sector code from company universe (optional)
+  2. Compute standard financial ratios from raw XBRL columns
+  3. Compute year-over-year percentage changes for all raw features
+  4. Add binary ``is_first_year`` flag for first/gap-year observations
+  5. Prune features below a coverage threshold (fit on train split)
+  6. Add binary missingness indicator flags
+  7. Fit a robust normalisation scaler on the train split
+  8. Transform all splits (train / val / test)
 
 Design decisions:
   - Quantile normalisation (rank -> normal) is default because financial
     ratios have extreme tails that break simple z-scoring.
   - Winsorisation at 1st/99th percentile as a safety net before transform.
   - Scaler is always fit on the train split only to prevent look-ahead bias.
-  - Missingness flags are binary and NOT normalised.
+  - Missingness flags and ``is_first_year`` are binary and NOT normalised.
+  - YoY deltas are computed for all 20 raw XBRL features (ATS-173).
+    First-year and year-gap observations get delta=0.0 + is_first_year=1
+    instead of NaN, so they pass cleanly through the scaler.
+  - SIC sector code is treated as a categorical feature (integer index
+    into FF12 12-industry sectors). It is NOT normalised but instead
+    consumed via nn.Embedding in the FT-Transformer (ATS-173).
+  - 10-Q quarter-matching is not yet implemented (pipeline is 10-K only).
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ import pandas as pd
 from sklearn.preprocessing import QuantileTransformer
 
 from fin_jepa.data.xbrl_pipeline import FEATURE_NAMES as RAW_FEATURES
+from fin_jepa.data.sector_map import FF12_SECTORS, sic_to_sector
 from fin_jepa.data.splits import SplitConfig, make_splits
 
 logger = logging.getLogger(__name__)
@@ -64,15 +74,14 @@ TRADITIONAL_RATIO_FEATURES = [
     "cfo_to_debt",
 ]
 
-YOY_BASE_FEATURES = [
-    "total_revenue",
-    "net_income",
-    "total_assets",
-    "total_debt",
-    "cash_from_operations",
-]
+YOY_BASE_FEATURES = list(RAW_FEATURES)
 
 YOY_FEATURES = [f"{col}_yoy" for col in YOY_BASE_FEATURES]
+
+IS_FIRST_YEAR_COL = "is_first_year"
+
+CATEGORICAL_FEATURES = ["sector_idx"]
+N_SECTORS = len(FF12_SECTORS)  # 12
 
 ID_COLUMNS = ["cik", "ticker", "fiscal_year", "period_end", "filed_date"]
 
@@ -89,6 +98,7 @@ class FeatureConfig:
     use_raw: bool = True
     use_ratios: bool = True
     use_yoy: bool = True
+    use_sic: bool = True
     use_missingness_flags: bool = True
     coverage_threshold: float = 0.50
     winsorize_limits: tuple[float, float] = (0.01, 0.99)
@@ -193,10 +203,20 @@ def compute_yoy_changes(
         (current - prior) / |prior|
 
     Using the absolute value of the prior handles negative base values
-    (e.g. negative net_income going to positive). The first observation
-    per CIK is NaN (no prior year).
+    (e.g. negative net_income going to positive).
+
+    A binary ``is_first_year`` column is added: 1 for the first observation
+    per CIK **and** for year-gap observations (where the prior fiscal year
+    in the data is more than 1 year before the current row — e.g. a company
+    that delisted and re-listed, or has XBRL filing gaps). For these rows,
+    all ``_yoy`` columns are set to 0.0 instead of NaN.
 
     New columns are named ``{feature}_yoy``.
+
+    .. note::
+
+       10-Q quarter-matching is not yet implemented — the pipeline currently
+       handles 10-K annual filings only.
     """
     if features is None:
         features = YOY_BASE_FEATURES
@@ -216,6 +236,16 @@ def compute_yoy_changes(
         abs_prior = abs_prior.where(abs_prior > 0, np.nan)
         change = (out[col] - prior) / abs_prior
         out[f"{col}_yoy"] = change
+
+    # Detect first-year and year-gap observations
+    prior_fy = out.groupby("cik")["fiscal_year"].shift(1)
+    is_first_or_gap = prior_fy.isna() | ((out["fiscal_year"] - prior_fy) > 1)
+    out[IS_FIRST_YEAR_COL] = is_first_or_gap.astype(np.int8)
+
+    # Zero-fill YoY columns for first-year/gap rows
+    yoy_cols = [f"{col}_yoy" for col in features if f"{col}_yoy" in out.columns]
+    for yc in yoy_cols:
+        out.loc[is_first_or_gap, yc] = 0.0
 
     return out
 
@@ -458,22 +488,51 @@ def apply_scaler(
     return scaler["_scaler"].transform(df)
 
 
+# ── SIC sector join ────────────────────────────────────────────────────
+
+def join_sic_code(
+    df: pd.DataFrame,
+    universe_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join SIC sector index from the company universe.
+
+    Adds two columns to *df*:
+      - ``sic_code``: raw 4-digit SIC code (str, nullable)
+      - ``sector_idx``: integer index (0–11) into :data:`FF12_SECTORS`
+
+    Missing or unrecognised SIC codes map to ``"Other"`` (index 11).
+    """
+    sic_map = universe_df[["cik", "sic_code"]].drop_duplicates("cik")
+    out = df.merge(sic_map, on="cik", how="left")
+    sector_to_idx = {s: i for i, s in enumerate(FF12_SECTORS)}
+    out["sector_idx"] = (
+        out["sic_code"]
+        .apply(sic_to_sector)
+        .map(sector_to_idx)
+        .fillna(sector_to_idx["Other"])
+        .astype(int)
+    )
+    return out
+
+
 # ── Top-level orchestrator ──────────────────────────────────────────────
 
 def build_feature_matrix(
     xbrl_df: pd.DataFrame,
     split_config: SplitConfig | None = None,
     feature_config: FeatureConfig | None = None,
-) -> tuple[dict[str, pd.DataFrame], FeatureScaler, list[str]]:
+    universe_df: pd.DataFrame | None = None,
+) -> tuple[dict[str, pd.DataFrame], FeatureScaler, list[str], list[str]]:
     """Build the full feature matrix from raw XBRL data.
 
     Steps:
-      1. Compute financial ratios (optional, controlled by config)
-      2. Compute year-over-year changes (optional)
-      3. Split into train/val/test
-      4. Prune low-coverage features (based on train split)
-      5. Add missingness flags (optional)
-      6. Fit :class:`FeatureScaler` on train, transform all splits
+      1. Join SIC sector code from company universe (optional)
+      2. Compute financial ratios (optional, controlled by config)
+      3. Compute year-over-year changes (optional) + ``is_first_year`` flag
+      4. Split into train/val/test
+      5. Prune low-coverage features (based on train split)
+      6. Add missingness flags (optional)
+      7. Fit :class:`FeatureScaler` on train, transform all splits
 
     Args:
         xbrl_df: Raw XBRL features DataFrame (output of the XBRL pipeline).
@@ -481,27 +540,45 @@ def build_feature_matrix(
             treated as a single "train" split.
         feature_config: Feature engineering configuration. Uses defaults if
             None.
+        universe_df: Company universe DataFrame with ``cik`` and ``sic_code``
+            columns.  Required when ``feature_config.use_sic`` is True.
 
     Returns:
-        Tuple of ``(split_dfs, scaler, final_feature_cols)`` where:
+        Tuple of ``(split_dfs, scaler, final_feature_cols, categorical_cols)``
+        where:
         - *split_dfs* maps ``"train"``/``"val"``/``"test"`` to DataFrames
         - *scaler* is the fitted :class:`FeatureScaler`
-        - *final_feature_cols* lists all feature columns (for model input)
+        - *final_feature_cols* lists all continuous feature columns (for model
+          input — these are normalised)
+        - *categorical_cols* lists categorical feature columns (not normalised;
+          consumed via ``nn.Embedding`` in the FT-Transformer)
     """
     if feature_config is None:
         feature_config = FeatureConfig()
 
     df = xbrl_df.copy()
 
-    # 1. Compute ratios
+    # 1. Join SIC sector code
+    categorical_cols: list[str] = []
+    if feature_config.use_sic:
+        if universe_df is not None:
+            df = join_sic_code(df, universe_df)
+            categorical_cols = list(CATEGORICAL_FEATURES)
+        else:
+            logger.warning(
+                "use_sic=True but no universe_df provided — skipping SIC join."
+            )
+
+    # 2. Compute ratios
     if feature_config.use_ratios:
         df = compute_ratios(df)
 
-    # 2. Compute YoY changes
+    # 3. Compute YoY changes (also adds is_first_year)
     if feature_config.use_yoy:
         df = compute_yoy_changes(df)
 
-    # Assemble candidate feature columns
+    # Assemble candidate feature columns (continuous only — excludes
+    # is_first_year and categorical features which are handled separately)
     candidate_features: list[str] = []
     if feature_config.use_raw:
         candidate_features.extend(
@@ -516,7 +593,7 @@ def build_feature_matrix(
             col for col in YOY_FEATURES if col in df.columns
         )
 
-    # 3. Split
+    # 4. Split
     if split_config is not None:
         splits = make_splits(df, split_config)
     else:
@@ -524,12 +601,13 @@ def build_feature_matrix(
 
     train_df = splits["train"]
 
-    # 4. Coverage-based pruning (decision on train split)
+    # 5. Coverage-based pruning (decision on train split)
     _, kept_features = prune_low_coverage(
         train_df, candidate_features, feature_config.coverage_threshold
     )
 
-    # Apply same column selection to all splits
+    # Apply same column selection to all splits (keep non-candidate columns
+    # like ID columns, is_first_year, and sector_idx intact)
     for key in splits:
         cols_to_keep = [
             c for c in splits[key].columns
@@ -537,7 +615,7 @@ def build_feature_matrix(
         ]
         splits[key] = splits[key][cols_to_keep].copy()
 
-    # 5. Missingness flags
+    # 6. Missingness flags
     flag_cols: list[str] = []
     if feature_config.use_missingness_flags:
         for key in splits:
@@ -545,10 +623,14 @@ def build_feature_matrix(
             if not flag_cols:
                 flag_cols = fcs
 
-    # Numeric features to normalise (excludes binary flags)
+    # is_first_year is a binary indicator — treat like a flag (not normalised)
+    if feature_config.use_yoy and IS_FIRST_YEAR_COL in splits["train"].columns:
+        flag_cols.append(IS_FIRST_YEAR_COL)
+
+    # Numeric features to normalise (excludes binary flags and categoricals)
     numeric_features = kept_features
 
-    # 6. Fit scaler on train, transform all splits
+    # 7. Fit scaler on train, transform all splits
     scaler = FeatureScaler(
         winsorize_limits=feature_config.winsorize_limits,
         method=feature_config.normalization_method,
@@ -562,12 +644,12 @@ def build_feature_matrix(
     final_feature_cols = kept_features + flag_cols
 
     logger.info(
-        "Feature matrix built: %d features (%d numeric + %d flags), "
+        "Feature matrix built: %d continuous + %d flags + %d categorical, "
         "splits: %s",
-        len(final_feature_cols),
-        len(numeric_features),
+        len(kept_features),
         len(flag_cols),
+        len(categorical_cols),
         {k: len(v) for k, v in splits.items()},
     )
 
-    return splits, scaler, final_feature_cols
+    return splits, scaler, final_feature_cols, categorical_cols

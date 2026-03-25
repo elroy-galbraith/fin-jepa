@@ -19,6 +19,7 @@ features:
   use_raw: true
   use_ratios: true
   use_yoy: true
+  use_sic: true
   use_missingness_flags: true
   coverage_threshold: 0.50
   winsorize_limits: [0.01, 0.99]
