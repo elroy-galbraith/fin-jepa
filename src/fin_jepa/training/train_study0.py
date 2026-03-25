@@ -302,6 +302,9 @@ def run_benchmark(config) -> dict:
     xbrl_df = load_xbrl_features(raw_dir)
     labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
 
+    xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
+    labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
+
     # Merge features + labels on (cik, period_end)
     merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
 
