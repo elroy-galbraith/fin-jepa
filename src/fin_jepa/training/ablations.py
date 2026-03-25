@@ -82,7 +82,7 @@ def run_ablations(config) -> dict:
         val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
         test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
     )
-    splits, scaler, feature_cols = build_feature_matrix(merged, split_cfg)
+    splits, scaler, feature_cols, _categorical_cols = build_feature_matrix(merged, split_cfg)
 
     outcomes = _cfg(config, "outcomes", ["stock_decline"])
     # Use first outcome for ablations unless specified

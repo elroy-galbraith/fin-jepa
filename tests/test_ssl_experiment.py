@@ -140,14 +140,14 @@ class TestRunSSLExperiment:
         )
 
         # Monkeypatch build_feature_matrix to skip real feature engineering
-        def mock_build_feature_matrix(merged_df, split_cfg, feat_cfg=None):
+        def mock_build_feature_matrix(merged_df, split_cfg, feat_cfg=None, universe_df=None):
             train = merged_df[merged_df["period_end"] <= "2017-12-31"].copy()
             val = merged_df[
                 (merged_df["period_end"] > "2017-12-31")
                 & (merged_df["period_end"] <= "2019-12-31")
             ].copy()
             test = merged_df[merged_df["period_end"] > "2019-12-31"].copy()
-            return {"train": train, "val": val, "test": test}, None, feature_cols
+            return {"train": train, "val": val, "test": test}, None, feature_cols, []
 
         monkeypatch.setattr(pretrain_ssl, "build_feature_matrix", mock_build_feature_matrix)
 

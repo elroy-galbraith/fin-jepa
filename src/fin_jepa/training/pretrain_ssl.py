@@ -142,12 +142,22 @@ def run_pretraining(config) -> Path:
         use_raw=_cfg(config, "features.use_raw", True),
         use_ratios=_cfg(config, "features.use_ratios", True),
         use_yoy=_cfg(config, "features.use_yoy", True),
+        use_sic=_cfg(config, "features.use_sic", True),
         use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
         coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
         normalization_method=_cfg(config, "features.normalization_method", "quantile"),
         median_impute=_cfg(config, "features.median_impute", True),
     )
-    splits, scaler, feature_cols = build_feature_matrix(xbrl_df, split_cfg, feat_cfg)
+
+    # Load universe for SIC join
+    universe_df = None
+    universe_path = raw_dir / "company_universe.parquet"
+    if universe_path.exists() and feat_cfg.use_sic:
+        universe_df = pd.read_parquet(universe_path)
+
+    splits, scaler, feature_cols, categorical_cols = build_feature_matrix(
+        xbrl_df, split_cfg, feat_cfg, universe_df=universe_df,
+    )
 
     train_loader = make_dataloader(
         splits["train"],
@@ -250,12 +260,22 @@ def run_ssl_experiment(config) -> dict:
         use_raw=_cfg(config, "features.use_raw", True),
         use_ratios=_cfg(config, "features.use_ratios", True),
         use_yoy=_cfg(config, "features.use_yoy", True),
+        use_sic=_cfg(config, "features.use_sic", True),
         use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
         coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
         normalization_method=_cfg(config, "features.normalization_method", "quantile"),
         median_impute=_cfg(config, "features.median_impute", True),
     )
-    splits, scaler, feature_cols = build_feature_matrix(merged, split_cfg, feat_cfg)
+
+    # Load universe for SIC join
+    universe_df = None
+    universe_path = raw_dir / "company_universe.parquet"
+    if universe_path.exists() and feat_cfg.use_sic:
+        universe_df = pd.read_parquet(universe_path)
+
+    splits, scaler, feature_cols, categorical_cols = build_feature_matrix(
+        merged, split_cfg, feat_cfg, universe_df=universe_df,
+    )
 
     n_features = len(feature_cols)
     log.info("SSL experiment: %d features, %d train rows.", n_features, len(splits["train"]))

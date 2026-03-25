@@ -210,6 +210,15 @@ def run_baselines(raw_dir: Path, processed_dir: Path, results_dir: Path) -> dict
     xbrl_df = load_xbrl_features(raw_dir)
     labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
 
+    # Load company universe for SIC sector join
+    universe_path = raw_dir / "company_universe.parquet"
+    universe_df = None
+    if universe_path.exists():
+        universe_df = pd.read_parquet(universe_path)
+        logger.info("  Universe: %d companies (for SIC join)", len(universe_df))
+    else:
+        logger.warning("  company_universe.parquet not found — SIC join will be skipped.")
+
     logger.info(
         "  XBRL: %d rows, %d companies", len(xbrl_df), xbrl_df["cik"].nunique()
     )
@@ -245,16 +254,25 @@ def run_baselines(raw_dir: Path, processed_dir: Path, results_dir: Path) -> dict
         use_raw=True,
         use_ratios=True,
         use_yoy=True,
+        use_sic=True,
         use_missingness_flags=True,
         coverage_threshold=0.50,
         normalization_method="quantile",
         median_impute=True,
     )
-    splits, _scaler, feature_cols = build_feature_matrix(merged, split_cfg, feat_cfg)
+    splits, _scaler, feature_cols, categorical_cols = build_feature_matrix(
+        merged, split_cfg, feat_cfg, universe_df=universe_df,
+    )
+
+    # For baseline models: include categorical features as integer columns
+    # alongside continuous features (XGBoost/GBT handle this natively; LR
+    # treats them as ordinal — imperfect but sufficient for baselines).
+    all_baseline_cols = feature_cols + categorical_cols
 
     logger.info(
-        "  Feature matrix: %d features | train=%d, val=%d, test=%d",
+        "  Feature matrix: %d continuous + %d categorical | train=%d, val=%d, test=%d",
         len(feature_cols),
+        len(categorical_cols),
         len(splits["train"]),
         len(splits.get("val", [])),
         len(splits.get("test", [])),
@@ -305,9 +323,9 @@ def run_baselines(raw_dir: Path, processed_dir: Path, results_dir: Path) -> dict
 
         pos_weight = n_neg / max(n_pos, 1)
 
-        X_train = np.nan_to_num(train_valid[feature_cols].to_numpy(dtype=np.float32), nan=0.0)
+        X_train = np.nan_to_num(train_valid[all_baseline_cols].to_numpy(dtype=np.float32), nan=0.0)
         y_train = train_valid[outcome].to_numpy(dtype=np.float32)
-        X_test  = np.nan_to_num(test_valid[feature_cols].to_numpy(dtype=np.float32), nan=0.0)
+        X_test  = np.nan_to_num(test_valid[all_baseline_cols].to_numpy(dtype=np.float32), nan=0.0)
         y_test  = test_valid[outcome].to_numpy(dtype=np.float32)
 
         outcome_results: dict = {}

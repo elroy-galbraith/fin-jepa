@@ -307,7 +307,7 @@ def run_benchmark(config) -> dict:
         normalization_method=_cfg(config, "features.normalization_method", "quantile"),
         median_impute=_cfg(config, "features.median_impute", True),
     )
-    splits, scaler, feature_cols = build_feature_matrix(merged, split_cfg, feat_cfg)
+    splits, scaler, feature_cols, _categorical_cols = build_feature_matrix(merged, split_cfg, feat_cfg)
 
     outcomes = _cfg(config, "outcomes", [
         "stock_decline", "earnings_restate", "audit_qualification",
