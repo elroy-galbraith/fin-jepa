@@ -91,3 +91,18 @@ htmlcov/
 # Outputs
 outputs/
 results/
+
+# Latex
+*.aux
+*.bbl
+*.blg
+*.out
+*.synctex(busy)
+*.synctex.gz
+*.toc
+*.log
+*.fls
+*.fdb_latexmk
+
+# MLflow
+mlflow.db
