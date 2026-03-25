@@ -84,3 +84,10 @@ htmlcov/
 
 # Type stubs
 *.pyi.bak
+
+# Claude
+.claude/
+
+# Outputs
+outputs/
+results/
