@@ -26,7 +26,9 @@ Splits are defined by the fiscal period end date (not the filing date or calenda
 
 All feature normalization statistics (medians, percentile bounds, quantile mappings) and coverage pruning decisions are computed on the training split only and applied identically to the validation and test splits.
 
-\todo{Update with exact split sizes once final pipeline is run (preliminary: ${\sim}$13,920 train / ${\sim}$5,657 val / ${\sim}$14,160 test).}
+Preliminary counts: ${\sim}$13{,}920 train / ${\sim}$5{,}657 val / ${\sim}$14{,}160 test observations. \todo{Verify exact split sizes from Colab notebook run.}
+
+As a robustness check, we also define a walk-forward evaluation scheme using expanding training windows. Starting with a train cutoff of 2014-12-31, each successive fold advances by one year, with a 1-year validation window and a 2-year test window, up to a final test boundary of 2023-12-31. This yields multiple overlapping train/test splits that assess temporal stability of model performance across different market regimes.
 
 \subsection{Evaluation Metrics}
 \label{sec:metrics}
@@ -44,6 +46,8 @@ We report the following metrics for each model--outcome pair, all computed on th
 \end{itemize}
 
 For outcomes where the test split contains only one class (all positives or all negatives), all metrics return NaN and the outcome is excluded from aggregate comparisons.
+
+In addition to aggregate metrics, we report AUROC and AUPRC stratified by Fama--French 12-industry sector. This sector-level breakdown surfaces whether model performance is concentrated in specific industries (e.g., finance) or generalises across the full company universe. Sectors with fewer than 30 observations or only one class in the test split are excluded from the stratified analysis.
 
 \subsection{Go/No-Go Gate}
 \label{sec:gate}

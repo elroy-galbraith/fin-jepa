@@ -37,11 +37,11 @@ From the 16 raw XBRL features, we derive two additional feature sets:
 \end{equation}
 where $X_1 = \text{working capital} / \text{total assets}$, $X_2 = \text{retained earnings} / \text{total assets}$, $X_3 = \text{operating income} / \text{total assets}$, $X_4 = \text{equity} / \text{total liabilities}$, and $X_5 = \text{revenue} / \text{total assets}$. All divisions use a minimum absolute denominator threshold of $10^{-8}$ to avoid numerical instability, returning NaN where the denominator is effectively zero.
 
-\paragraph{Year-over-year changes (5 features).} For each of total revenue, net income, total assets, total debt, and cash from operations, we compute the year-over-year percentage change as $(x_t - x_{t-1}) / |x_{t-1}|$. Using the absolute value of the prior-year value in the denominator handles sign changes (e.g., a firm moving from negative to positive net income). The first observation per company is NaN by construction.
+\paragraph{Year-over-year changes (16 features).} For each of the 16 raw XBRL features, we compute the year-over-year percentage change as $(x_t - x_{t-1}) / |x_{t-1}|$. Using the absolute value of the prior-year value in the denominator handles sign changes (e.g., a firm moving from negative to positive net income). The first observation per company receives NaN by construction and is flagged with \texttt{is\_first\_year}${}= 1$.
 
 \paragraph{Missingness indicators.} For each numeric feature retained after coverage pruning, we add a binary indicator variable equal to~1 if the original value was missing and~0 otherwise. These flags are not normalized.
 
-The default configuration uses all feature groups (raw + ratios + YoY + missingness flags), yielding up to 33 numeric features plus their corresponding missingness indicators.
+The default configuration uses all feature groups (raw + ratios + YoY + missingness flags), yielding 45 numeric features (16 raw + 12 ratios + 16 YoY + 1 \texttt{is\_first\_year}) plus one categorical feature (\texttt{sector\_idx}, Fama--French 12-industry) and their corresponding missingness indicators.
 
 \subsection{Feature Normalization}
 \label{sec:normalization}
@@ -90,4 +90,4 @@ We construct five binary distress outcome labels per company-year, covering dist
 
 The first two outcomes (\texttt{stock\_decline} and \texttt{earnings\_restate}) are derived entirely from publicly available EDGAR data. The remaining three require external datasets: the Dechow et al.\ AAER database for SEC enforcement actions, the UCLA-LoPucki Bankruptcy Research Database for bankruptcy filings, and Audit Analytics for audit opinions. When external label files are not present, the corresponding label columns are all-NaN and the outcome is excluded from evaluation. Delisted companies with insufficient post-filing price data are treated as stock decline events.
 
-\todo{Update with final label coverage statistics once ATS-172 is complete.}
+\todo{Verify final label coverage statistics from Colab notebook run (ATS-172).}

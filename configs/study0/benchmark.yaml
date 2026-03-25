@@ -94,6 +94,13 @@ training:
   patience: 10       # early stopping patience (epochs)
   seed: 42
 
+rolling_split:
+  first_train_end: "2014-12-31"
+  val_window_years: 1
+  test_window_years: 2
+  step_years: 1
+  last_test_end: "2023-12-31"
+
 gate:
   min_wins: 3        # FT-Transformer must win >= 3/5 outcomes
   auroc_margin: 0.01 # by at least this AUROC margin

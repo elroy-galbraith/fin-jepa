@@ -575,6 +575,61 @@ class TestBuildLabelDatabase:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# TestDelistingEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestDelistingEdgeCases:
+    """Edge-case tests for delisting handling in stock_decline labels."""
+
+    def test_delisted_marked_as_decline(self):
+        """When treat_delisted_as_decline=True, delisted + NaN return → label=1."""
+        df = pd.DataFrame({
+            "cik": ["0000000001"],
+            "mkt_adj_252d": [np.nan],
+            "delisted": [True],
+        })
+        cfg = LabelConfig(treat_delisted_as_decline=True)
+        labels = _compute_stock_decline(df, cfg)
+        assert labels.iloc[0] == 1
+
+    def test_delisted_not_marked_when_flag_off(self):
+        """When treat_delisted_as_decline=False, delisted + NaN → NaN (not 0)."""
+        df = pd.DataFrame({
+            "cik": ["0000000001"],
+            "mkt_adj_252d": [np.nan],
+            "delisted": [True],
+        })
+        cfg = LabelConfig(treat_delisted_as_decline=False)
+        labels = _compute_stock_decline(df, cfg)
+        assert pd.isna(labels.iloc[0])
+
+    def test_delisted_with_valid_negative_return(self):
+        """A delisted company with mkt_adj_252d below threshold gets
+        stock_decline=1 from the return logic (not just from the delist flag)."""
+        df = pd.DataFrame({
+            "cik": ["0000000001"],
+            "mkt_adj_252d": [-0.50],
+            "delisted": [True],
+        })
+        cfg = LabelConfig(treat_delisted_as_decline=False, decline_threshold=-0.20)
+        labels = _compute_stock_decline(df, cfg)
+        assert labels.iloc[0] == 1
+
+    def test_delisted_with_positive_return_still_gets_1(self):
+        """A delisted company with a positive return but treat_delisted_as_decline=True
+        should get stock_decline=1 (the delist flag overrides the return)."""
+        df = pd.DataFrame({
+            "cik": ["0000000001"],
+            "mkt_adj_252d": [0.15],
+            "delisted": [True],
+        })
+        cfg = LabelConfig(treat_delisted_as_decline=True, decline_threshold=-0.20)
+        labels = _compute_stock_decline(df, cfg)
+        assert labels.iloc[0] == 1
+
+
 class TestOutcomeType:
     def test_all_outcomes_list(self):
         assert len(ALL_OUTCOMES) == 5

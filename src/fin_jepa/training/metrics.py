@@ -107,6 +107,54 @@ def compute_all_metrics(y_true: np.ndarray, y_score: np.ndarray) -> dict[str, fl
     }
 
 
+def compute_sector_stratified_metrics(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    sector_ids: np.ndarray,
+    sector_names: list[str] | None = None,
+    min_samples: int = 30,
+) -> dict[str, dict[str, float]]:
+    """Compute AUROC and AUPRC per Fama-French 12 sector.
+
+    Parameters
+    ----------
+    y_true : binary labels
+    y_score : predicted probabilities
+    sector_ids : integer sector indices (0–11)
+    sector_names : optional list mapping index → display name
+    min_samples : minimum samples with both classes to compute metrics
+
+    Returns
+    -------
+    Dict mapping sector name to ``{auroc, auprc, n_samples, n_positive}``.
+    Sectors with fewer than *min_samples* or only one class get NaN metrics.
+    """
+    if sector_names is None:
+        from fin_jepa.data.sector_map import FF12_SECTORS
+        sector_names = FF12_SECTORS
+
+    results: dict[str, dict[str, float]] = {}
+    for idx, name in enumerate(sector_names):
+        mask = sector_ids == idx
+        n = int(mask.sum())
+        n_pos = int(y_true[mask].sum()) if n > 0 else 0
+        if n < min_samples or n_pos == 0 or n_pos == n:
+            results[name] = {
+                "auroc": float("nan"),
+                "auprc": float("nan"),
+                "n_samples": n,
+                "n_positive": n_pos,
+            }
+        else:
+            results[name] = {
+                "auroc": float(roc_auc_score(y_true[mask], y_score[mask])),
+                "auprc": float(average_precision_score(y_true[mask], y_score[mask])),
+                "n_samples": n,
+                "n_positive": n_pos,
+            }
+    return results
+
+
 def go_no_go_gate(
     ft_results: dict[str, dict[str, float]],
     xgb_results: dict[str, dict[str, float]],

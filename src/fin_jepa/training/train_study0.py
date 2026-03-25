@@ -39,7 +39,11 @@ from fin_jepa.models.baselines import (
 )
 from fin_jepa.models.ft_transformer import FTTransformer
 from fin_jepa.training.dataset import make_dataloader
-from fin_jepa.training.metrics import compute_all_metrics, go_no_go_gate
+from fin_jepa.training.metrics import (
+    compute_all_metrics,
+    compute_sector_stratified_metrics,
+    go_no_go_gate,
+)
 from fin_jepa.training.temporal_cv import TemporalCV
 from fin_jepa.utils.reproducibility import seed_everything
 
@@ -578,6 +582,20 @@ def run_benchmark(config) -> dict:
             "gbt_raw": gbt_metrics,
         }
 
+        # ── Sector-stratified evaluation ──────────────────────────────
+        if "sector_idx" in test_valid.columns:
+            sector_mask = test_valid["sector_idx"].notna()
+            sector_ids = test_valid.loc[sector_mask, "sector_idx"].to_numpy(dtype=int)
+            if len(sector_ids) > 0:
+                all_results[outcome]["sector_stratified"] = {
+                    "ft_transformer": compute_sector_stratified_metrics(
+                        ft_y_true[sector_mask.values], ft_y_score[sector_mask.values], sector_ids,
+                    ),
+                    "xgboost": compute_sector_stratified_metrics(
+                        y_test[sector_mask.values], xgb_scores[sector_mask.values], sector_ids,
+                    ),
+                }
+
     # ── Go / No-Go gate ──────────────────────────────────────────────
     evaluated_outcomes = list(ft_results.keys())
     if evaluated_outcomes:
@@ -612,6 +630,18 @@ def run_benchmark(config) -> dict:
     with open(results_path, "w") as f:
         json.dump(output, f, indent=2, default=str)
     log.info("Results saved to %s", results_path)
+
+    # ── Save sector-stratified results separately ─────────────────────
+    sector_results = {
+        oc: res["sector_stratified"]
+        for oc, res in all_results.items()
+        if "sector_stratified" in res
+    }
+    if sector_results:
+        sector_path = results_dir / "sector_stratified_results.json"
+        with open(sector_path, "w") as f:
+            json.dump(sector_results, f, indent=2, default=str)
+        log.info("Sector-stratified results saved to %s", sector_path)
 
     # ── Optional MLflow logging ──────────────────────────────────────
     try:

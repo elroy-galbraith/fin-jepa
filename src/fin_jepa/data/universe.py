@@ -872,3 +872,61 @@ def load_company_universe(
                 provenance = json.load(fh)
 
     return df, provenance
+
+
+def snapshot_universe_per_split(
+    universe_df: pd.DataFrame,
+    splits: dict[str, pd.DataFrame],
+    output_dir: Path | str | None = None,
+    cik_col: str = "cik",
+    sector_col: str = "sector",
+) -> dict[str, pd.DataFrame]:
+    """Filter the company universe to companies present in each split.
+
+    For each split partition, inner-joins on CIK to produce a per-split
+    company universe snapshot with summary statistics.
+
+    Parameters
+    ----------
+    universe_df : company-level DataFrame from :func:`build_company_universe`
+    splits : ``{'train': df, 'val': df, 'test': df}``
+    output_dir : if given, writes each snapshot to
+        ``{output_dir}/universe_{split_name}.parquet`` and a combined
+        ``universe_snapshots_summary.json``
+    cik_col : column name for company identifiers
+    sector_col : column name for sector classification
+
+    Returns
+    -------
+    Dict mapping split name to filtered universe DataFrame.
+    """
+    snapshots: dict[str, pd.DataFrame] = {}
+    summary: dict[str, dict] = {}
+
+    for name, part in splits.items():
+        if cik_col not in part.columns:
+            continue
+        ciks = part[cik_col].unique()
+        snap = universe_df[universe_df[cik_col].isin(ciks)].copy()
+        snapshots[name] = snap
+
+        info: dict[str, Any] = {"n_companies": len(snap)}
+        if sector_col in snap.columns:
+            info["sector_distribution"] = (
+                snap[sector_col].value_counts().to_dict()
+            )
+        if "is_current_filer" in snap.columns:
+            info["pct_current_filers"] = round(
+                float(snap["is_current_filer"].mean()) * 100, 1,
+            )
+        summary[name] = info
+
+    if output_dir is not None:
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        for name, snap in snapshots.items():
+            snap.to_parquet(out / f"universe_{name}.parquet", index=False)
+        with open(out / "universe_snapshots_summary.json", "w", encoding="utf-8") as fh:
+            json.dump(summary, fh, indent=2, default=str)
+
+    return snapshots
