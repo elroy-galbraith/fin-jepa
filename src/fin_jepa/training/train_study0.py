@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import roc_auc_score
 
 from fin_jepa.data.feature_engineering import (
+    N_SECTORS,
     TRADITIONAL_RATIO_FEATURES,
     FeatureConfig,
     RAW_FEATURES,
@@ -79,10 +80,16 @@ def train_ft_transformer(
         model.train()
         train_loss = 0.0
         n_batches = 0
-        for x_batch, y_batch in train_loader:
+        for batch in train_loader:
+            if len(batch) == 3:
+                x_batch, x_cat_batch, y_batch = batch
+                x_cat_batch = x_cat_batch.to(device)
+            else:
+                x_batch, y_batch = batch
+                x_cat_batch = None
             x_batch, y_batch = x_batch.to(device), y_batch.to(device)
             optimizer.zero_grad()
-            logits = model(x_batch).squeeze(-1)
+            logits = model(x_batch, x_cat_batch).squeeze(-1)
             loss = criterion(logits, y_batch)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -154,9 +161,15 @@ def _predict_scores(
     all_labels: list[np.ndarray] = []
 
     with torch.no_grad():
-        for x_batch, y_batch in loader:
+        for batch in loader:
+            if len(batch) == 3:
+                x_batch, x_cat_batch, y_batch = batch
+                x_cat_batch = x_cat_batch.to(device)
+            else:
+                x_batch, y_batch = batch
+                x_cat_batch = None
             x_batch = x_batch.to(device)
-            logits = model(x_batch).squeeze(-1)
+            logits = model(x_batch, x_cat_batch).squeeze(-1)
             scores = torch.sigmoid(logits).cpu().numpy()
             all_scores.append(scores)
             all_labels.append(y_batch.numpy())
@@ -302,12 +315,24 @@ def run_benchmark(config) -> dict:
         use_raw=_cfg(config, "features.use_raw", True),
         use_ratios=_cfg(config, "features.use_ratios", True),
         use_yoy=_cfg(config, "features.use_yoy", True),
+        use_sic=_cfg(config, "features.use_sic", True),
         use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
         coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
         normalization_method=_cfg(config, "features.normalization_method", "quantile"),
         median_impute=_cfg(config, "features.median_impute", True),
     )
-    splits, scaler, feature_cols, _categorical_cols = build_feature_matrix(merged, split_cfg, feat_cfg)
+
+    # Load universe for SIC join
+    universe_df = None
+    universe_path = raw_dir / "company_universe.parquet"
+    if universe_path.exists() and feat_cfg.use_sic:
+        universe_df = pd.read_parquet(universe_path)
+
+    splits, scaler, feature_cols, categorical_cols = build_feature_matrix(
+        merged, split_cfg, feat_cfg, universe_df=universe_df,
+    )
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
 
     outcomes = _cfg(config, "outcomes", [
         "stock_decline", "earnings_restate", "audit_qualification",
@@ -494,12 +519,15 @@ def run_benchmark(config) -> dict:
         # ── FT-Transformer ──────────────────────────────────────────
         train_loader = make_dataloader(
             train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
+            cat_feature_cols=categorical_cols or None,
         )
         val_loader = make_dataloader(
             val_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
+            cat_feature_cols=categorical_cols or None,
         )
         test_loader = make_dataloader(
             test_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
+            cat_feature_cols=categorical_cols or None,
         )
 
         ft_model = FTTransformer(
@@ -510,6 +538,8 @@ def run_benchmark(config) -> dict:
             d_ffn_factor=int(_cfg(config, "ft_transformer.d_ffn_factor", 4)),
             dropout=float(_cfg(config, "ft_transformer.dropout", 0.0)),
             n_outputs=1,
+            n_cat_features=n_cat,
+            cat_cardinalities=cat_cards,
         ).to(device)
 
         optimizer = torch.optim.AdamW(ft_model.parameters(), lr=lr, weight_decay=wd)

@@ -17,7 +17,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fin_jepa.data.feature_engineering import FeatureConfig, build_feature_matrix
+from fin_jepa.data.feature_engineering import (
+    N_SECTORS,
+    FeatureConfig,
+    build_feature_matrix,
+)
 from fin_jepa.data.splits import SplitConfig
 from fin_jepa.data.xbrl_loader import load_xbrl_features
 from fin_jepa.data.labels import load_label_database
@@ -82,7 +86,18 @@ def run_ablations(config) -> dict:
         val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
         test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
     )
-    splits, scaler, feature_cols, _categorical_cols = build_feature_matrix(merged, split_cfg)
+    # Load universe for SIC join
+    import pandas as pd
+    universe_df = None
+    universe_path = raw_dir / "company_universe.parquet"
+    if universe_path.exists():
+        universe_df = pd.read_parquet(universe_path)
+
+    splits, scaler, feature_cols, categorical_cols = build_feature_matrix(
+        merged, split_cfg, universe_df=universe_df,
+    )
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
 
     outcomes = _cfg(config, "outcomes", ["stock_decline"])
     # Use first outcome for ablations unless specified
@@ -105,6 +120,9 @@ def run_ablations(config) -> dict:
             param_name="n_layers",
             param_values=n_layers_grid,
             seed=seed,
+            cat_feature_cols=categorical_cols,
+            n_cat=n_cat,
+            cat_cards=cat_cards,
         )
         all_sweep_results["n_layers"] = results
         _save_sweep(results_dir / "n_layers_sweep.json", results)
@@ -118,6 +136,9 @@ def run_ablations(config) -> dict:
             param_name="d_token",
             param_values=d_token_grid,
             seed=seed,
+            cat_feature_cols=categorical_cols,
+            n_cat=n_cat,
+            cat_cards=cat_cards,
         )
         all_sweep_results["d_token"] = results
         _save_sweep(results_dir / "d_token_sweep.json", results)
@@ -130,6 +151,9 @@ def run_ablations(config) -> dict:
             splits, feature_cols, outcome, device,
             fractions=fractions,
             seed=seed,
+            cat_feature_cols=categorical_cols,
+            n_cat=n_cat,
+            cat_cards=cat_cards,
         )
         all_sweep_results["train_fraction"] = results
         _save_sweep(results_dir / "train_fraction_sweep.json", results)
@@ -142,6 +166,9 @@ def run_ablations(config) -> dict:
             splits, feature_cols, outcome, device,
             mask_ratios=mask_ratios,
             seed=seed,
+            cat_feature_cols=categorical_cols,
+            n_cat=n_cat,
+            cat_cards=cat_cards,
         )
         all_sweep_results["mask_ratio"] = results
         _save_sweep(results_dir / "mask_ratio_sweep.json", results)
@@ -161,6 +188,9 @@ def _run_architecture_sweep(
     param_name: str,
     param_values: list,
     seed: int = 42,
+    cat_feature_cols: list[str] | None = None,
+    n_cat: int = 0,
+    cat_cards: list[int] | None = None,
 ) -> list[dict]:
     """Sweep a single FT-Transformer hyperparameter, holding others at default."""
     results = []
@@ -177,6 +207,8 @@ def _run_architecture_sweep(
             "d_ffn_factor": _BENCHMARK_DEFAULTS["d_ffn_factor"],
             "dropout": _BENCHMARK_DEFAULTS["dropout"],
             "n_outputs": 1,
+            "n_cat_features": n_cat,
+            "cat_cardinalities": cat_cards,
         }
         model_kwargs[param_name] = int(value)
 
@@ -191,6 +223,7 @@ def _run_architecture_sweep(
 
         metrics = _train_and_evaluate(
             splits, feature_cols, outcome, device, model_kwargs,
+            cat_feature_cols=cat_feature_cols,
         )
         results.append({param_name: value, **metrics})
 
@@ -204,6 +237,9 @@ def _run_fraction_sweep(
     device: torch.device,
     fractions: list[float],
     seed: int = 42,
+    cat_feature_cols: list[str] | None = None,
+    n_cat: int = 0,
+    cat_cards: list[int] | None = None,
 ) -> list[dict]:
     """Sweep training set size (scaling curve)."""
     results = []
@@ -224,9 +260,12 @@ def _run_fraction_sweep(
             "d_ffn_factor": _BENCHMARK_DEFAULTS["d_ffn_factor"],
             "dropout": _BENCHMARK_DEFAULTS["dropout"],
             "n_outputs": 1,
+            "n_cat_features": n_cat,
+            "cat_cardinalities": cat_cards,
         }
         metrics = _train_and_evaluate(
             sub_splits, feature_cols, outcome, device, model_kwargs,
+            cat_feature_cols=cat_feature_cols,
         )
         results.append({"train_fraction": frac, "n_train": n_sample, **metrics})
 
@@ -240,6 +279,7 @@ def _train_and_evaluate(
     device: torch.device,
     model_kwargs: dict,
     init_state_dict: dict | None = None,
+    cat_feature_cols: list[str] | None = None,
 ) -> dict:
     """Train an FT-Transformer and return test metrics.
 
@@ -249,6 +289,8 @@ def _train_and_evaluate(
         If provided, load these weights into the model before fine-tuning
         (e.g. from SSL pretraining). Uses ``strict=False`` so the
         classification head can differ.
+    cat_feature_cols:
+        Categorical feature column names to pass to the dataloader.
     """
     train_df = splits["train"][splits["train"][outcome].notna()]
     val_df = splits["val"][splits["val"][outcome].notna()]
@@ -263,9 +305,10 @@ def _train_and_evaluate(
     pos_weight = n_neg / max(n_pos, 1)
 
     batch_size = _BENCHMARK_DEFAULTS["batch_size"]
-    train_loader = make_dataloader(train_df, feature_cols, outcome, batch_size, shuffle=True)
-    val_loader = make_dataloader(val_df, feature_cols, outcome, batch_size, shuffle=False)
-    test_loader = make_dataloader(test_df, feature_cols, outcome, batch_size, shuffle=False)
+    _cat_cols = cat_feature_cols or None
+    train_loader = make_dataloader(train_df, feature_cols, outcome, batch_size, shuffle=True, cat_feature_cols=_cat_cols)
+    val_loader = make_dataloader(val_df, feature_cols, outcome, batch_size, shuffle=False, cat_feature_cols=_cat_cols)
+    test_loader = make_dataloader(test_df, feature_cols, outcome, batch_size, shuffle=False, cat_feature_cols=_cat_cols)
 
     model = FTTransformer(**model_kwargs).to(device)
     if init_state_dict is not None:
@@ -299,6 +342,9 @@ def _run_mask_ratio_sweep(
     mask_ratios: list[float],
     seed: int = 42,
     pretrain_epochs: int = 50,
+    cat_feature_cols: list[str] | None = None,
+    n_cat: int = 0,
+    cat_cards: list[int] | None = None,
 ) -> list[dict]:
     """Sweep SSL mask ratio: pretrain with each ratio, fine-tune, compare."""
     results = []
@@ -311,7 +357,12 @@ def _run_mask_ratio_sweep(
         "d_ffn_factor": _BENCHMARK_DEFAULTS["d_ffn_factor"],
         "dropout": _BENCHMARK_DEFAULTS["dropout"],
         "n_outputs": 1,
+        "n_cat_features": n_cat,
+        "cat_cardinalities": cat_cards,
     }
+
+    has_cat = bool(cat_feature_cols)
+    _cat_cols = cat_feature_cols or None
 
     for ratio in mask_ratios:
         seed_everything(seed)
@@ -327,14 +378,19 @@ def _run_mask_ratio_sweep(
         ssl_loader = make_dataloader(
             splits["train"], feature_cols, label_col=None,
             batch_size=_BENCHMARK_DEFAULTS["batch_size"], shuffle=True,
+            cat_feature_cols=_cat_cols,
         )
 
         for _epoch in range(pretrain_epochs):
             ssl_model.train()
-            for (x_batch,) in ssl_loader:
-                x_batch = x_batch.to(device)
+            for batch in ssl_loader:
+                if has_cat and len(batch) >= 2:
+                    x_batch, x_cat_batch = batch[0].to(device), batch[1].to(device)
+                else:
+                    x_batch = batch[0].to(device)
+                    x_cat_batch = None
                 ssl_optimizer.zero_grad()
-                loss, _, _ = ssl_model(x_batch)
+                loss, _, _ = ssl_model(x_batch, x_cat=x_cat_batch)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(ssl_model.parameters(), max_norm=1.0)
                 ssl_optimizer.step()
@@ -345,6 +401,7 @@ def _run_mask_ratio_sweep(
         metrics = _train_and_evaluate(
             splits, feature_cols, outcome, device, model_kwargs,
             init_state_dict=pretrained_state,
+            cat_feature_cols=cat_feature_cols,
         )
         metrics["mask_ratio"] = ratio
         results.append(metrics)

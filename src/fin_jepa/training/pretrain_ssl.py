@@ -19,7 +19,12 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 
-from fin_jepa.data.feature_engineering import FeatureConfig, build_feature_matrix
+from fin_jepa.data.feature_engineering import (
+    CATEGORICAL_FEATURES,
+    N_SECTORS,
+    FeatureConfig,
+    build_feature_matrix,
+)
 from fin_jepa.data.splits import SplitConfig
 from fin_jepa.data.xbrl_loader import load_xbrl_features
 from fin_jepa.models.ft_transformer import FTTransformer
@@ -77,15 +82,21 @@ def _pretrain_encoder(
 
     loss_history: list[float] = []
 
+    has_cat = hasattr(ssl_model.encoder.tokenizer, "n_cat_features") and ssl_model.encoder.tokenizer.n_cat_features > 0
+
     for epoch in range(1, epochs + 1):
         ssl_model.train()
         total_loss = 0.0
         n_batches = 0
 
-        for (x_batch,) in train_loader:
-            x_batch = x_batch.to(device)
+        for batch in train_loader:
+            if has_cat and len(batch) >= 2:
+                x_batch, x_cat_batch = batch[0].to(device), batch[1].to(device)
+            else:
+                x_batch = batch[0].to(device)
+                x_cat_batch = None
             optimizer.zero_grad()
-            loss, _x_hat, _mask = ssl_model(x_batch)
+            loss, _x_hat, _mask = ssl_model(x_batch, x_cat=x_cat_batch)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(ssl_model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -165,10 +176,16 @@ def run_pretraining(config) -> Path:
         label_col=None,
         batch_size=int(_cfg(config, "training.batch_size", 512)),
         shuffle=True,
+        cat_feature_cols=categorical_cols or None,
     )
 
     n_features = len(feature_cols)
-    log.info("Training SSL on %d features, %d train rows.", n_features, len(splits["train"]))
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
+    log.info(
+        "Training SSL on %d continuous + %d categorical features, %d train rows.",
+        n_features, n_cat, len(splits["train"]),
+    )
 
     # ── Model ────────────────────────────────────────────────────────
     encoder = FTTransformer(
@@ -179,6 +196,8 @@ def run_pretraining(config) -> Path:
         d_ffn_factor=int(_cfg(config, "ft_transformer.d_ffn_factor", 4)),
         dropout=float(_cfg(config, "ft_transformer.dropout", 0.0)),
         n_outputs=1,
+        n_cat_features=n_cat,
+        cat_cardinalities=cat_cards,
     )
     mask_ratio = float(_cfg(config, "ssl.mask_ratio", 0.15))
 
@@ -278,7 +297,12 @@ def run_ssl_experiment(config) -> dict:
     )
 
     n_features = len(feature_cols)
-    log.info("SSL experiment: %d features, %d train rows.", n_features, len(splits["train"]))
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
+    log.info(
+        "SSL experiment: %d continuous + %d categorical features, %d train rows.",
+        n_features, n_cat, len(splits["train"]),
+    )
 
     outcomes = _cfg(config, "outcomes", _DEFAULT_OUTCOMES)
     mask_ratios = _cfg(config, "ssl_experiment.mask_ratios", [0.15, 0.30, 0.50])
@@ -291,6 +315,8 @@ def run_ssl_experiment(config) -> dict:
         "d_ffn_factor": int(_cfg(config, "ft_transformer.d_ffn_factor", _BENCHMARK_DEFAULTS["d_ffn_factor"])),
         "dropout": float(_cfg(config, "ft_transformer.dropout", _BENCHMARK_DEFAULTS["dropout"])),
         "n_outputs": 1,
+        "n_cat_features": n_cat,
+        "cat_cardinalities": cat_cards,
     }
 
     pretrain_epochs = int(_cfg(config, "pretrain.epochs", 200))
@@ -307,6 +333,7 @@ def run_ssl_experiment(config) -> dict:
         log.info("  baseline — %s", outcome)
         metrics = _train_and_evaluate(
             splits, feature_cols, outcome, device, model_kwargs,
+            cat_feature_cols=categorical_cols,
         )
         baseline_results[outcome] = metrics
 
@@ -324,6 +351,7 @@ def run_ssl_experiment(config) -> dict:
         ssl_loader = make_dataloader(
             splits["train"], feature_cols, label_col=None,
             batch_size=pretrain_batch_size, shuffle=True,
+            cat_feature_cols=categorical_cols or None,
         )
 
         encoder = FTTransformer(**model_kwargs)
@@ -352,6 +380,7 @@ def run_ssl_experiment(config) -> dict:
             metrics = _train_and_evaluate(
                 splits, feature_cols, outcome, device, model_kwargs,
                 init_state_dict=state_dict,
+                cat_feature_cols=categorical_cols,
             )
             pretrained_results[ratio_key][outcome] = metrics
 

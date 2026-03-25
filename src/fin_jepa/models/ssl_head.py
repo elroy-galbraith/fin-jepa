@@ -50,12 +50,19 @@ class MaskedFeatureSSL(nn.Module):
         )
 
     def forward(
-        self, x: torch.Tensor
+        self,
+        x: torch.Tensor,
+        x_cat: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
+        Parameters
+        ----------
+        x:     (B, n_features) numerical features
+        x_cat: (B, n_cat_features) long tensor — categorical features (optional)
+
         Returns
         -------
-        loss:        scalar reconstruction MSE
+        loss:        scalar reconstruction MSE (on numerical features only)
         x_hat:       (B, n_features) predicted values
         mask:        (B, n_features) bool mask (True = masked)
         """
@@ -63,8 +70,8 @@ class MaskedFeatureSSL(nn.Module):
         x_masked = x.clone()
         x_masked[mask] = 0.0  # replace masked features with zero
 
-        repr_ = self.encoder.get_representation(x_masked)  # (B, d_token)
-        x_hat = self.reconstruction_head(repr_)             # (B, n_features)
+        repr_ = self.encoder.get_representation(x_masked, x_cat)  # (B, d_token)
+        x_hat = self.reconstruction_head(repr_)                    # (B, n_features)
 
         loss = ((x_hat - x) ** 2 * mask.float()).sum() / mask.float().sum().clamp(min=1)
         return loss, x_hat, mask
