@@ -13,11 +13,11 @@ This paper makes the following contributions:
 \begin{enumerate}[leftmargin=*]
   \item We construct a reproducible dataset of 16 XBRL-derived financial features for the full universe of SEC 10-K filers from 2012 to 2024, with four binary distress outcome labels, using only publicly available data sources.
 
-  \item We benchmark the FT-Transformer against logistic regression (with both traditional ratios and full feature sets), XGBoost, and a histogram-based gradient-boosted tree on distress prediction, using a strictly temporal evaluation protocol that prevents look-ahead bias.
+  \item We benchmark the FT-Transformer---with hyperparameters selected via a 36-configuration grid search---against logistic regression (with both traditional ratios and full feature sets), XGBoost, and a histogram-based gradient-boosted tree on distress prediction, using a strictly temporal evaluation protocol that prevents look-ahead bias.
 
   \item We evaluate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer and measure its effect on downstream classification performance.
 
   \item We release the complete data extraction pipeline, feature engineering code, model implementations, and evaluation scripts as open-source software to support reproducibility and further research.
 \end{enumerate}
 
-This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. The results here determine whether the FT-Transformer is a viable base encoder for the structured financial modality before committing to cross-modal integration in subsequent studies.
+This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. The tuned FT-Transformer passes the validation gate, exceeding XGBoost by at least 0.01 AUROC on all four distress outcomes (statistically significant on two), confirming it as a viable base encoder for the structured financial modality in subsequent studies.
