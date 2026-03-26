@@ -4,9 +4,9 @@
 \subsection{FT-Transformer as a Financial Encoder}
 \label{sec:disc_encoder}
 
-The FT-Transformer demonstrates a clear pattern: it outperforms tree-based baselines on rare-event outcomes (\texttt{earnings\_restate}, \texttt{bankruptcy}) while trailing slightly on the higher-prevalence \texttt{stock\_decline} outcome. This aligns with findings from \citet{gorishniy2021revisiting} that attention-based models handle heterogeneous feature interactions more effectively than tree ensembles when the signal is distributed across many features rather than concentrated in a few dominant splits. For distress prediction, where the relevant patterns may involve subtle multi-feature interactions (e.g., deteriorating liquidity ratios combined with rising leverage and falling operating margins), the FT-Transformer's global self-attention may capture dependencies that tree-based models miss.
+The tuned FT-Transformer beats XGBoost on all four distress outcomes, with the largest gains on rare-event outcomes (\texttt{sec\_enforcement} $+0.075$, \texttt{bankruptcy} $+0.034$, \texttt{earnings\_restate} $+0.033$). It trails LR-full on \texttt{stock\_decline} (0.667 vs.\ 0.682), the highest-prevalence outcome. This aligns with findings from \citet{gorishniy2021revisiting} that attention-based models handle heterogeneous feature interactions more effectively than tree ensembles when the signal is distributed across many features rather than concentrated in a few dominant splits. For distress prediction, where the relevant patterns may involve subtle multi-feature interactions (e.g., deteriorating liquidity ratios combined with rising leverage and falling operating margins), the FT-Transformer's global self-attention may capture dependencies that tree-based models miss.
 
-The FT-Transformer's calibration advantage is also practically significant. On \texttt{stock\_decline} (ECE 0.047 vs.\ next-best 0.079), its predicted probabilities more closely match observed distress rates. In a risk management context, well-calibrated probabilities are arguably more important than marginal discrimination gains, since they enable principled threshold-setting and portfolio-level risk aggregation.
+The FT-Transformer also shows strong calibration on low-base-rate outcomes. On \texttt{sec\_enforcement} (ECE 0.220 vs.\ LR-traditional's 0.456) and \texttt{bankruptcy} (ECE 0.381 vs.\ 0.437), the Transformer produces substantially better-calibrated probabilities despite similar discrimination. In a risk management context, well-calibrated probabilities are arguably more important than marginal discrimination gains, since they enable principled threshold-setting and portfolio-level risk aggregation.
 
 \subsection{Self-Supervised Pretraining}
 \label{sec:disc_ssl}
@@ -18,13 +18,19 @@ The absence of a single optimal mask ratio across outcomes suggests that differe
 \subsection{Implications for Study~1}
 \label{sec:disc_study1}
 
-\todo{Expand after final tuned results are in.}
+With the tuned FT-Transformer passing the go/no-go gate (4/4 outcomes, statistically significant on 2/4), the results support proceeding with the FT-Transformer as the financial modality encoder for the JEPA architecture in Study~1. Several findings inform the design:
 
-The results support proceeding with the FT-Transformer as the financial modality encoder for the JEPA architecture in Study~1, with the following caveats. First, the encoder should be initialized from SSL-pretrained weights (the specific mask ratio can be selected per outcome or via a sweep). Second, the latent space appears to capture meaningful financial structure---evidenced by the fact that SSL pretraining improves downstream prediction even though the pretraining objective (feature reconstruction) has no direct relationship to distress labels. This is an encouraging signal for the JEPA program: if the latent space is rich enough to support feature reconstruction, it may also be rich enough to support temporal prediction (Study~1) and cross-modal alignment (Study~2).
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{SSL pretraining is beneficial.} The encoder should be initialized from SSL-pretrained weights. While no single mask ratio dominates, $r = 0.50$ yields the strongest gains on the most challenging outcomes (\texttt{sec\_enforcement}, \texttt{earnings\_restate}).
+
+  \item \textbf{The latent space captures financial structure.} SSL pretraining improves downstream prediction even though the pretraining objective (feature reconstruction) has no direct relationship to distress labels. This is an encouraging signal: if the latent space is rich enough to support feature reconstruction, it may also be rich enough to support temporal prediction (Study~1) and cross-modal alignment (Study~2).
+
+  \item \textbf{Hyperparameter sensitivity is moderate.} The grid search (\Cref{fig:sweep_heatmap}) shows that performance varies by up to 0.05 mean AUROC across configurations, with learning rate the most influential factor. This suggests that per-study tuning is warranted but the architecture is not fragile.
+\end{enumerate}
 
 \subsection{Limitations}
 \label{sec:limitations}
 
-Several limitations should be noted. All models use default (untuned) hyperparameters; a hyperparameter sweep for the FT-Transformer is in progress and is expected to improve results, particularly on \texttt{stock\_decline} where the gap to the best baseline is small. The \texttt{sec\_enforcement} outcome has an extremely low base rate (AUPRC $< 0.01$ across all models), making AUROC comparisons on this outcome noisy and potentially unreliable. All experiments use a single random seed (42); future work should report variance across multiple seeds. Finally, the test period (2020--2023) spans the COVID-19 market disruption, which provides a valuable out-of-distribution stress test but also means the test distribution may differ systematically from the training distribution in ways that advantage or disadvantage particular model families.
+Several limitations should be noted. The FT-Transformer was tuned via grid search while baselines use default hyperparameters, which may overstate the Transformer's relative advantage; a fairer comparison would tune all models equally. The \texttt{sec\_enforcement} and \texttt{bankruptcy} outcomes have very low base rates (AUPRC $< 0.02$ across all models), making AUROC comparisons noisy---the bootstrap CIs on these outcomes are wide and do not exclude zero. All experiments use a single random seed (42); future work should report variance across multiple seeds. Finally, the test period (2020--2023) spans the COVID-19 market disruption, which provides a valuable out-of-distribution stress test but also means the test distribution may differ systematically from the training distribution in ways that advantage or disadvantage particular model families.
 
 \todo{Add paragraph on comparison to prior work once literature review is complete.}
