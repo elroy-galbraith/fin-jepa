@@ -155,6 +155,116 @@ def compute_sector_stratified_metrics(
     return results
 
 
+def hanley_mcneil_se(auroc: float, n_pos: int, n_neg: int) -> float:
+    """Compute the Hanley-McNeil standard error for an AUROC estimate.
+
+    Parameters
+    ----------
+    auroc : float
+        The observed AUROC (A).
+    n_pos : int
+        Number of positive examples in the evaluation set.
+    n_neg : int
+        Number of negative examples in the evaluation set.
+
+    Returns
+    -------
+    float — standard error of the AUROC estimate.
+
+    References
+    ----------
+    Hanley & McNeil (1982), "The Meaning and Use of the Area under a Receiver
+    Operating Characteristic (ROC) Curve", Radiology 143(1):29-36.
+    """
+    A = auroc
+    Q1 = A / (2.0 - A)
+    Q2 = 2.0 * A ** 2 / (1.0 + A)
+    var = (
+        A * (1.0 - A)
+        + (n_pos - 1) * (Q1 - A ** 2)
+        + (n_neg - 1) * (Q2 - A ** 2)
+    ) / (n_pos * n_neg)
+    return float(np.sqrt(max(var, 0.0)))
+
+
+def bootstrap_auroc_ci(
+    y_true: np.ndarray,
+    y_score_a: np.ndarray,
+    y_score_b: np.ndarray | None = None,
+    n_bootstrap: int = 2000,
+    alpha: float = 0.05,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Bootstrap confidence interval for AUROC (single model or pairwise difference).
+
+    When *y_score_b* is None, returns a CI for ``auroc(y_score_a)``.
+    When *y_score_b* is provided, returns a CI for ``auroc(y_score_a) - auroc(y_score_b)``
+    using paired bootstrap (same resample indices for both models).
+
+    Parameters
+    ----------
+    y_true : array of binary labels
+    y_score_a : predicted probabilities for model A
+    y_score_b : predicted probabilities for model B (optional, for pairwise delta)
+    n_bootstrap : number of bootstrap replicates
+    alpha : significance level (0.05 → 95% CI)
+    seed : random seed
+
+    Returns
+    -------
+    dict with keys:
+        estimate  : point estimate (AUROC or delta AUROC)
+        ci_lower  : lower bound of (1-alpha) CI
+        ci_upper  : upper bound of (1-alpha) CI
+        significant : bool — True if CI does not contain 0 (pairwise only)
+    """
+    from sklearn.metrics import roc_auc_score
+
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+
+    auc_a = float(roc_auc_score(y_true, y_score_a)) if len(np.unique(y_true)) >= 2 else float("nan")
+
+    if y_score_b is None:
+        estimate = auc_a
+        boot_stats = []
+        for _ in range(n_bootstrap):
+            idx = rng.integers(0, n, size=n)
+            yt = y_true[idx]
+            if len(np.unique(yt)) < 2:
+                continue
+            boot_stats.append(float(roc_auc_score(yt, y_score_a[idx])))
+        boot_arr = np.array(boot_stats)
+        ci_lower = float(np.percentile(boot_arr, 100 * alpha / 2))
+        ci_upper = float(np.percentile(boot_arr, 100 * (1 - alpha / 2)))
+        return {"estimate": estimate, "ci_lower": ci_lower, "ci_upper": ci_upper}
+
+    auc_b = float(roc_auc_score(y_true, y_score_b)) if len(np.unique(y_true)) >= 2 else float("nan")
+    estimate = auc_a - auc_b
+
+    boot_deltas = []
+    for _ in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        yt = y_true[idx]
+        if len(np.unique(yt)) < 2:
+            continue
+        da = float(roc_auc_score(yt, y_score_a[idx]))
+        db = float(roc_auc_score(yt, y_score_b[idx]))
+        boot_deltas.append(da - db)
+
+    deltas_arr = np.array(boot_deltas)
+    ci_lower = float(np.percentile(deltas_arr, 100 * alpha / 2))
+    ci_upper = float(np.percentile(deltas_arr, 100 * (1 - alpha / 2)))
+    significant = bool(ci_lower > 0 or ci_upper < 0)
+
+    return {
+        "estimate": estimate,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+        "significant": significant,
+    }
+
+
 def go_no_go_gate(
     ft_results: dict[str, dict[str, float]],
     xgb_results: dict[str, dict[str, float]],

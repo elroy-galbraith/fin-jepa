@@ -1,0 +1,757 @@
+{
+  "_meta": {
+    "spec": "ATS-176",
+    "generated_at": "2026-03-26",
+    "sources": [
+      "results\\study0\\baseline_results.json",
+      "results\\study0\\ssl_experiment_results.json"
+    ],
+    "ci_method": "hanley_mcneil_analytical",
+    "ci_note": "CIs computed analytically using the Hanley-McNeil (1982) formula. Sample sizes are estimates from calibration-bin density; full paired bootstrap CIs require raw prediction arrays (see fin_jepa.training.metrics.bootstrap_auroc_ci).",
+    "sample_size_estimates": {
+      "stock_decline": {
+        "n_pos": 1200,
+        "n_neg": 1300
+      },
+      "earnings_restate": {
+        "n_pos": 450,
+        "n_neg": 4050
+      },
+      "sec_enforcement": {
+        "n_pos": 40,
+        "n_neg": 3960
+      },
+      "bankruptcy": {
+        "n_pos": 45,
+        "n_neg": 3955
+      },
+      "audit_qualification": {
+        "n_pos": 0,
+        "n_neg": 0
+      }
+    }
+  },
+  "models": {
+    "lr_trad": "Logistic Regression \u2014 traditional ratios only",
+    "lr_full": "Logistic Regression \u2014 full XBRL feature set",
+    "xgboost": "XGBoost \u2014 full XBRL feature set (tuned)",
+    "gbt_raw": "HistGradientBoosting \u2014 raw XBRL, no feature engineering",
+    "ft_scratch": "FT-Transformer \u2014 trained from scratch (tuned)",
+    "ft_ssl_0.15": "FT-Transformer \u2014 fine-tuned from SSL pretraining (mask_ratio=0.15)"
+  },
+  "outcomes": [
+    "stock_decline",
+    "earnings_restate",
+    "audit_qualification",
+    "sec_enforcement",
+    "bankruptcy"
+  ],
+  "metrics": {
+    "stock_decline": {
+      "lr_trad": {
+        "auroc": 0.6439935002760335,
+        "auprc": 0.7140286718085126,
+        "brier": 0.23503533797129392,
+        "ece": 0.07857827005818442,
+        "auroc_ci_95": [
+          0.6224,
+          0.6656
+        ]
+      },
+      "lr_full": {
+        "auroc": 0.6815792616679999,
+        "auprc": 0.7345982202412888,
+        "brier": 0.22658188390899223,
+        "ece": 0.08154127628208521,
+        "auroc_ci_95": [
+          0.6607,
+          0.7025
+        ]
+      },
+      "xgboost": {
+        "auroc": 0.651704877868489,
+        "auprc": 0.7263244657727188,
+        "brier": 0.2631794214248657,
+        "ece": 0.1640976217675708,
+        "auroc_ci_95": [
+          0.6303,
+          0.6732
+        ]
+      },
+      "gbt_raw": {
+        "auroc": 0.6771907482927908,
+        "auprc": 0.7458820603440464,
+        "brier": 0.2314471708428329,
+        "ece": 0.10104204845147981,
+        "auroc_ci_95": [
+          0.6562,
+          0.6982
+        ]
+      },
+      "ft_scratch": {
+        "auroc": 0.657523927891644,
+        "auprc": 0.7300305081091116,
+        "brier": 0.2390957474708557,
+        "ece": 0.08749585872491694,
+        "auroc_ci_95": [
+          0.6362,
+          0.6789
+        ]
+      },
+      "ft_ssl_0.15": {
+        "auroc": 0.6724425935291265,
+        "auprc": 0.7407200417303419,
+        "brier": 0.23145079612731934,
+        "ece": 0.08988695952821563,
+        "auroc_ci_95": [
+          0.6514,
+          0.6935
+        ]
+      }
+    },
+    "earnings_restate": {
+      "lr_trad": {
+        "auroc": 0.6191214929599618,
+        "auprc": 0.15959224801719346,
+        "brier": 0.2553225558105239,
+        "ece": 0.39683728460203405,
+        "auroc_ci_95": [
+          0.5903,
+          0.648
+        ]
+      },
+      "lr_full": {
+        "auroc": 0.6601990576649518,
+        "auprc": 0.17537360237465816,
+        "brier": 0.2512816912184645,
+        "ece": 0.3846982796965102,
+        "auroc_ci_95": [
+          0.6316,
+          0.6888
+        ]
+      },
+      "xgboost": {
+        "auroc": 0.6567310198013114,
+        "auprc": 0.18155405388214618,
+        "brier": 0.11992964148521423,
+        "ece": 0.10336647669581327,
+        "auroc_ci_95": [
+          0.6281,
+          0.6853
+        ]
+      },
+      "gbt_raw": {
+        "auroc": 0.6699836723509404,
+        "auprc": 0.18982211923440287,
+        "brier": 0.2274293248007497,
+        "ece": 0.3592066675205535,
+        "auroc_ci_95": [
+          0.6415,
+          0.6984
+        ]
+      },
+      "ft_scratch": {
+        "auroc": 0.6743427663776606,
+        "auprc": 0.18094544493340026,
+        "brier": 0.22573767602443695,
+        "ece": 0.358720359087285,
+        "auroc_ci_95": [
+          0.6459,
+          0.7027
+        ]
+      },
+      "ft_ssl_0.15": {
+        "auroc": 0.6745137823926701,
+        "auprc": 0.18318327685625538,
+        "brier": 0.22174856066703796,
+        "ece": 0.3442612383619877,
+        "auroc_ci_95": [
+          0.6461,
+          0.7029
+        ]
+      }
+    },
+    "audit_qualification": {
+      "lr_trad": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "lr_full": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "xgboost": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "gbt_raw": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "ft_scratch": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "ft_ssl_0.15": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      }
+    },
+    "sec_enforcement": {
+      "lr_trad": {
+        "auroc": 0.6064242036405008,
+        "auprc": 0.010233699116212037,
+        "brier": 0.22869964879307533,
+        "ece": 0.45597244230554096,
+        "auroc_ci_95": [
+          0.513,
+          0.6998
+        ]
+      },
+      "lr_full": {
+        "auroc": 0.40224672331247635,
+        "auprc": 0.00591115486914473,
+        "brier": 0.16706539339312595,
+        "ece": 0.26718419838744856,
+        "auroc_ci_95": [
+          0.3203,
+          0.4842
+        ]
+      },
+      "xgboost": {
+        "auroc": 0.5387888254882442,
+        "auprc": 0.00885915096967609,
+        "brier": 0.007004637736827135,
+        "ece": 0.006470562911315528,
+        "auroc_ci_95": [
+          0.447,
+          0.6306
+        ]
+      },
+      "gbt_raw": {
+        "auroc": 0.6008347998435722,
+        "auprc": 0.008922478212855552,
+        "brier": 0.13841526734892365,
+        "ece": 0.3527100232340829,
+        "auroc_ci_95": [
+          0.5075,
+          0.6942
+        ]
+      },
+      "ft_scratch": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "ft_ssl_0.15": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      }
+    },
+    "bankruptcy": {
+      "lr_trad": {
+        "auroc": 0.6457379807737741,
+        "auprc": 0.01407096460838201,
+        "brier": 0.2204652696437614,
+        "ece": 0.4371233031470526,
+        "auroc_ci_95": [
+          0.5579,
+          0.7336
+        ]
+      },
+      "lr_full": {
+        "auroc": 0.6465689458461512,
+        "auprc": 0.014156569811348711,
+        "brier": 0.18578080007770512,
+        "ece": 0.33428215790050264,
+        "auroc_ci_95": [
+          0.5587,
+          0.7344
+        ]
+      },
+      "xgboost": {
+        "auroc": 0.6174741433783297,
+        "auprc": 0.018613607025945323,
+        "brier": 0.00810872483998537,
+        "ece": 0.006867100413300899,
+        "auroc_ci_95": [
+          0.5294,
+          0.7056
+        ]
+      },
+      "gbt_raw": {
+        "auroc": 0.5610003332680238,
+        "auprc": 0.009985163475783019,
+        "brier": 0.11596140856285232,
+        "ece": 0.31167630384553335,
+        "auroc_ci_95": [
+          0.4736,
+          0.6484
+        ]
+      },
+      "ft_scratch": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      },
+      "ft_ssl_0.15": {
+        "auroc": null,
+        "auprc": null,
+        "brier": null,
+        "ece": null,
+        "auroc_ci_95": [
+          null,
+          null
+        ]
+      }
+    }
+  },
+  "bootstrap_cis": {
+    "_method": "hanley_mcneil_analytical (conservative, ignores model correlation)",
+    "ft_scratch_vs_baselines": {
+      "stock_decline": {
+        "lr_trad": {
+          "delta_auroc": 0.0135,
+          "ci_95": [
+            -0.0168,
+            0.0439
+          ],
+          "significant": false
+        },
+        "lr_full": {
+          "delta_auroc": -0.0241,
+          "ci_95": [
+            -0.0539,
+            0.0058
+          ],
+          "significant": false
+        },
+        "xgboost": {
+          "delta_auroc": 0.0058,
+          "ci_95": [
+            -0.0244,
+            0.0361
+          ],
+          "significant": false
+        },
+        "gbt_raw": {
+          "delta_auroc": -0.0197,
+          "ci_95": [
+            -0.0496,
+            0.0103
+          ],
+          "significant": false
+        }
+      },
+      "earnings_restate": {
+        "lr_trad": {
+          "delta_auroc": 0.0552,
+          "ci_95": [
+            0.0147,
+            0.0957
+          ],
+          "significant": true
+        },
+        "lr_full": {
+          "delta_auroc": 0.0141,
+          "ci_95": [
+            -0.0261,
+            0.0544
+          ],
+          "significant": false
+        },
+        "xgboost": {
+          "delta_auroc": 0.0176,
+          "ci_95": [
+            -0.0227,
+            0.0579
+          ],
+          "significant": false
+        },
+        "gbt_raw": {
+          "delta_auroc": 0.0044,
+          "ci_95": [
+            -0.0358,
+            0.0446
+          ],
+          "significant": false
+        }
+      },
+      "audit_qualification": {
+        "lr_trad": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "lr_full": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "xgboost": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "gbt_raw": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        }
+      },
+      "sec_enforcement": {
+        "lr_trad": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "lr_full": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "xgboost": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "gbt_raw": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        }
+      },
+      "bankruptcy": {
+        "lr_trad": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "lr_full": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "xgboost": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "gbt_raw": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        }
+      }
+    },
+    "ft_ssl_0.15_vs_baselines": {
+      "stock_decline": {
+        "lr_trad": {
+          "delta_auroc": 0.0284,
+          "ci_95": [
+            -0.0017,
+            0.0586
+          ],
+          "significant": false
+        },
+        "lr_full": {
+          "delta_auroc": -0.0091,
+          "ci_95": [
+            -0.0388,
+            0.0205
+          ],
+          "significant": false
+        },
+        "xgboost": {
+          "delta_auroc": 0.0207,
+          "ci_95": [
+            -0.0093,
+            0.0508
+          ],
+          "significant": false
+        },
+        "gbt_raw": {
+          "delta_auroc": -0.0047,
+          "ci_95": [
+            -0.0345,
+            0.025
+          ],
+          "significant": false
+        }
+      },
+      "earnings_restate": {
+        "lr_trad": {
+          "delta_auroc": 0.0554,
+          "ci_95": [
+            0.0149,
+            0.0959
+          ],
+          "significant": true
+        },
+        "lr_full": {
+          "delta_auroc": 0.0143,
+          "ci_95": [
+            -0.026,
+            0.0546
+          ],
+          "significant": false
+        },
+        "xgboost": {
+          "delta_auroc": 0.0178,
+          "ci_95": [
+            -0.0225,
+            0.0581
+          ],
+          "significant": false
+        },
+        "gbt_raw": {
+          "delta_auroc": 0.0045,
+          "ci_95": [
+            -0.0357,
+            0.0447
+          ],
+          "significant": false
+        }
+      },
+      "audit_qualification": {
+        "lr_trad": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "lr_full": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "xgboost": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "gbt_raw": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        }
+      },
+      "sec_enforcement": {
+        "lr_trad": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "lr_full": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "xgboost": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "gbt_raw": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        }
+      },
+      "bankruptcy": {
+        "lr_trad": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "lr_full": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "xgboost": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        },
+        "gbt_raw": {
+          "delta_auroc": null,
+          "ci_95": [
+            null,
+            null
+          ],
+          "significant": null
+        }
+      }
+    }
+  },
+  "gate": {
+    "criterion": "FT-Transformer (best SSL) beats XGBoost on >=3/5 outcomes by >=0.01 AUROC",
+    "passed": false,
+    "conditional_pass": true,
+    "n_wins": 2,
+    "n_evaluable": 2,
+    "n_outcomes_total": 5,
+    "n_skipped": 3,
+    "skipped_reason": "Outcomes with <20 positives in train split cannot train FT-Transformer; all skipped outcomes (audit_qualification, sec_enforcement, bankruptcy) have highly imbalanced labels.",
+    "recommendation": "CONDITIONAL_GO",
+    "ssl_recommendation": "Use mask_ratio=0.15 as default SSL pretraining configuration",
+    "outcome_detail": {
+      "stock_decline": {
+        "ft_ssl_0.15_auroc": 0.6724,
+        "xgboost_auroc": 0.6517,
+        "delta": 0.0207,
+        "win": true,
+        "skipped": false
+      },
+      "earnings_restate": {
+        "ft_ssl_0.15_auroc": 0.6745,
+        "xgboost_auroc": 0.6567,
+        "delta": 0.0178,
+        "win": true,
+        "skipped": false
+      },
+      "audit_qualification": {
+        "ft_ssl_0.15_auroc": null,
+        "xgboost_auroc": null,
+        "delta": null,
+        "win": null,
+        "skipped": true
+      },
+      "sec_enforcement": {
+        "ft_ssl_0.15_auroc": null,
+        "xgboost_auroc": 0.5387888254882442,
+        "delta": null,
+        "win": null,
+        "skipped": true
+      },
+      "bankruptcy": {
+        "ft_ssl_0.15_auroc": null,
+        "xgboost_auroc": 0.6174741433783297,
+        "delta": null,
+        "win": null,
+        "skipped": true
+      }
+    }
+  }
+}
