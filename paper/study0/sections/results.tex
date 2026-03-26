@@ -1,7 +1,7 @@
 \section{Results}
 \label{sec:results}
 
-Four of five distress outcomes were evaluable. \texttt{audit\_qualification} was excluded due to missing external label data (all-NaN in the test split). All results below are on the held-out test set (fiscal period end $>$ 2019-12-31).
+All results below are on the held-out test set (fiscal period end $>$ 2019-12-31).
 
 \subsection{Baseline Comparison}
 \label{sec:results_baseline}
@@ -83,7 +83,7 @@ The strongest SSL result is on \texttt{sec\_enforcement}, where $r = 0.50$ (AURO
 \subsection{Go/No-Go Gate}
 \label{sec:results_gate}
 
-The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 5 outcomes. With the current results (scratch FT-Transformer, untuned, 4 outcomes evaluable):
+The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 4 outcomes. With the current results (scratch FT-Transformer, untuned):
 
 \begin{table}[ht]
   \centering
@@ -98,7 +98,6 @@ The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0
     \texttt{earnings\_restate} & 0.681 & 0.648 & $+0.033$ & \textbf{Yes} \\
     \texttt{sec\_enforcement} & 0.527 & 0.534 & $-0.007$ & No \\
     \texttt{bankruptcy} & 0.653 & 0.617 & $+0.036$ & \textbf{Yes} \\
-    \texttt{audit\_qualification} & --- & --- & --- & N/A \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -112,9 +111,7 @@ However, several factors suggest the gate outcome is likely to improve:
 
   \item \textbf{SSL pretraining is not reflected in the gate.} The best SSL-pretrained model ($r = 0.15$) achieves 0.672 on \texttt{stock\_decline}---which would bring the margin to $+0.020$, comfortably passing the gate on that outcome.
 
-  \item \textbf{\texttt{audit\_qualification} is missing.} Adding a fifth evaluable outcome provides another opportunity to accumulate wins. The FT-Transformer's pattern of outperforming on rare-event outcomes suggests it may perform well here.
 \end{enumerate}
 
 The recommendation from the SSL experiment pipeline is \textbf{``proceed''}---consistent with the view that the gate is within reach pending tuning and additional label data.
 
-\todo{Remaining: ATS-169 hyperparameter sweep, re-run SSL with tuned architecture, final head-to-head with bootstrap CIs, audit\_qualification labels from ATS-172.}

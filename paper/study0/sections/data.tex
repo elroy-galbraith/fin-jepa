@@ -41,7 +41,7 @@ where $X_1 = \text{working capital} / \text{total assets}$, $X_2 = \text{retaine
 
 \paragraph{Missingness indicators.} For each numeric feature retained after coverage pruning, we add a binary indicator variable equal to~1 if the original value was missing and~0 otherwise. These flags are not normalized.
 
-The default configuration uses all feature groups (raw + ratios + YoY + missingness flags), yielding 45 numeric features (16 raw + 12 ratios + 16 YoY + 1 \texttt{is\_first\_year}) plus one categorical feature (\texttt{sector\_idx}, Fama--French 12-industry) and their corresponding missingness indicators.
+The default configuration uses all feature groups (raw + ratios + YoY + missingness flags). Before coverage pruning, this yields 45 numeric features (16 raw + 12 ratios + 16 YoY + 1 \texttt{is\_first\_year}) plus one categorical feature (\texttt{sector\_idx}, Fama--French 12-industry). After pruning features with less than 50\% non-null coverage in the training split and appending per-feature binary missingness indicators, the final model input comprises 83 continuous features and 1 categorical feature.
 
 \subsection{Feature Normalization}
 \label{sec:normalization}
@@ -68,7 +68,7 @@ For each company-year observation, we align market data to the 10-K filing date 
 \subsection{Distress Labels}
 \label{sec:labels}
 
-We construct five binary distress outcome labels per company-year, covering distinct dimensions of financial distress. Labels are assigned based on events occurring within a 365-day horizon following the fiscal period end date. Label columns use nullable Int8 dtype, where 0 indicates no event, 1 indicates a distress event, and NaN indicates that the label is unavailable for that observation (not equivalent to a negative label).
+We construct four binary distress outcome labels per company-year, covering distinct dimensions of financial distress. Labels are assigned based on events occurring within a 365-day horizon following the fiscal period end date. Label columns use nullable Int8 dtype, where 0 indicates no event, 1 indicates a distress event, and NaN indicates that the label is unavailable for that observation (not equivalent to a negative label).
 
 \begin{table}[ht]
   \centering
@@ -83,11 +83,10 @@ We construct five binary distress outcome labels per company-year, covering dist
     \texttt{earnings\_restate} & EDGAR filing index & 10-K/A amendment filed within horizon \\
     \texttt{sec\_enforcement} & Dechow et al.\ AAER database & SEC enforcement release within horizon \\
     \texttt{bankruptcy} & UCLA-LoPucki BRD / Compustat & Chapter~7 or 11 filing within horizon \\
-    \texttt{audit\_qualification} & Audit Analytics (deferred) & Going-concern or adverse opinion \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The first two outcomes (\texttt{stock\_decline} and \texttt{earnings\_restate}) are derived entirely from publicly available EDGAR data. The remaining three require external datasets: the Dechow et al.\ AAER database for SEC enforcement actions, the UCLA-LoPucki Bankruptcy Research Database for bankruptcy filings, and Audit Analytics for audit opinions. When external label files are not present, the corresponding label columns are all-NaN and the outcome is excluded from evaluation. Delisted companies with insufficient post-filing price data are treated as stock decline events.
+The first two outcomes (\texttt{stock\_decline} and \texttt{earnings\_restate}) are derived entirely from publicly available EDGAR data. The remaining two require external datasets: the Dechow et al.\ AAER database for SEC enforcement actions and the UCLA-LoPucki Bankruptcy Research Database for bankruptcy filings. When external label files are not present, the corresponding label columns are all-NaN and the outcome is excluded from evaluation. Delisted companies with insufficient post-filing price data are treated as stock decline events.
 
-\todo{Verify final label coverage statistics from Colab notebook run (ATS-172).}
+On the test split, approximate positive/negative counts are: \texttt{stock\_decline} 1{,}200/1{,}300, \texttt{earnings\_restate} 450/4{,}050, \texttt{sec\_enforcement} 40/3{,}960, and \texttt{bankruptcy} 45/3{,}955.

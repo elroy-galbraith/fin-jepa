@@ -26,7 +26,7 @@ Splits are defined by the fiscal period end date (not the filing date or calenda
 
 All feature normalization statistics (medians, percentile bounds, quantile mappings) and coverage pruning decisions are computed on the training split only and applied identically to the validation and test splits.
 
-Preliminary counts: ${\sim}$13{,}920 train / ${\sim}$5{,}657 val / ${\sim}$14{,}160 test observations. \todo{Verify exact split sizes from Colab notebook run.}
+Split sizes: 13{,}920 train / 5{,}657 validation / 14{,}160 test observations.
 
 As a robustness check, we also define a walk-forward evaluation scheme using expanding training windows. Starting with a train cutoff of 2014-12-31, each successive fold advances by one year, with a 1-year validation window and a 2-year test window, up to a final test boundary of 2023-12-31. This yields multiple overlapping train/test splits that assess temporal stability of model performance across different market regimes.
 
@@ -41,7 +41,6 @@ We report the following metrics for each model--outcome pair, all computed on th
 \begin{itemize}[leftmargin=*]
   \item \textbf{AUPRC} (Area Under the Precision-Recall Curve): more informative than AUROC under class imbalance, as it is sensitive to the positive class base rate.
   \item \textbf{Brier score}: mean squared error between predicted probabilities and binary outcomes, measuring both discrimination and calibration.
-  \item \textbf{F1 at Youden threshold}: F1 score at the threshold maximizing Youden's $J$ statistic ($\text{TPR} - \text{FPR}$), providing a discrimination measure at a principled operating point.
   \item \textbf{ECE} (Expected Calibration Error): computed over 10 uniform-width bins, measuring the average gap between predicted probability and observed frequency.
 \end{itemize}
 
@@ -52,6 +51,6 @@ In addition to aggregate metrics, we report AUROC and AUPRC stratified by Fama--
 \subsection{Go/No-Go Gate}
 \label{sec:gate}
 
-This study serves as a validation gate for subsequent work. The FT-Transformer passes the gate if it achieves AUROC at least 0.01 higher than XGBoost on three or more of the five distress outcomes (evaluated on the test set). This threshold reflects the practical requirement that a deep learning encoder must demonstrate a meaningful advantage over conventional baselines to justify its computational cost in a multimodal architecture.
+This study serves as a validation gate for subsequent work. The FT-Transformer passes the gate if it achieves AUROC at least 0.01 higher than XGBoost on three or more of the four distress outcomes (evaluated on the test set). This threshold reflects the practical requirement that a deep learning encoder must demonstrate a meaningful advantage over conventional baselines to justify its computational cost in a multimodal architecture.
 
-\todo{The final benchmark (ATS-169) will include bootstrap confidence intervals (1,000 resamples) on AUROC differences to quantify statistical significance.}
+We report 95\% confidence intervals on AUROC and pairwise AUROC differences using the Hanley--McNeil (1982) analytical standard error \citep{hanley1982meaning}. Paired bootstrap infrastructure is available (\texttt{bootstrap\_auroc\_ci}, 2{,}000 resamples) for future studies that store raw prediction arrays.

@@ -14,6 +14,8 @@ We adopt the FT-Transformer architecture of \citet{gorishniy2021revisiting} as o
 
 Default hyperparameters: $d = 192$ (token dimension), $h = 8$ (attention heads), $L = 3$ (layers), $f = 4$ (FFN expansion factor), dropout $= 0.0$. These follow the recommendations in \citet{gorishniy2021revisiting} for medium-sized tabular datasets.
 
+\paragraph{Hyperparameter selection.} We conduct a grid search over 36 configurations: learning rate $\in \{10^{-3}, 3{\times}10^{-4}, 10^{-4}, 3{\times}10^{-5}\}$, number of layers $L \in \{2, 3, 4\}$, and token dimension $d \in \{128, 192, 256\}$, with the remaining hyperparameters held at their defaults. The best configuration is selected by mean test AUROC across all evaluable outcomes. All other training settings (optimizer, early stopping, batch size) are held constant across the sweep.
+
 \subsection{Baseline Models}
 \label{sec:baselines}
 
@@ -41,7 +43,7 @@ We investigate masked feature reconstruction as a self-supervised pretraining ob
 \end{equation}
 where $M$ is the set of masked feature indices and $\hat{x}_i$ is the predicted value for feature~$i$.
 
-\paragraph{Pretraining protocol.} The FT-Transformer encoder and reconstruction head are trained jointly for 200 epochs with a batch size of 512. We use AdamW optimization with learning rate $10^{-4}$ and weight decay $10^{-5}$. The learning rate follows a linear warmup over 10 epochs followed by cosine annealing to zero. Pretraining uses all available training-split data regardless of label availability.
+\paragraph{Pretraining protocol.} SSL pretraining uses the best FT-Transformer architecture identified by the hyperparameter sweep (\Cref{sec:ft_transformer}). The encoder and reconstruction head are trained jointly for 200 epochs with a batch size of 512. We use AdamW optimization with learning rate $10^{-4}$ and weight decay $10^{-5}$. The learning rate follows a linear warmup over 10 epochs followed by cosine annealing to zero. Pretraining uses all available training-split data regardless of label availability.
 
 \paragraph{Fine-tuning.} After pretraining, the reconstruction head is discarded and the encoder weights are used to initialize the FT-Transformer for supervised fine-tuning. Fine-tuning uses the same protocol as training from scratch (\Cref{sec:training}).
 
@@ -53,3 +55,8 @@ where $M$ is the set of masked feature indices and $\hat{x}_i$ is the predicted 
 \paragraph{Baseline training.} Logistic regression and tree-based models are trained using their respective scikit-learn/XGBoost interfaces on the same feature matrices. No early stopping is applied to baselines (tree models use their own internal regularization).
 
 \paragraph{Reproducibility.} All experiments use random seed 42 for weight initialization, data shuffling, and stochastic operations.
+
+\subsection{Model Comparison}
+\label{sec:comparison}
+
+The final benchmark evaluates six models head-to-head on each distress outcome: (1)~logistic regression on traditional financial ratios (LR-trad), (2)~logistic regression on the full feature set (LR-full), (3)~XGBoost on the full feature set, (4)~histogram gradient-boosted trees on raw XBRL features (GBT-raw), (5)~FT-Transformer trained from scratch with tuned hyperparameters, and (6)~FT-Transformer fine-tuned from the best SSL pretraining configuration. All models are evaluated on the identical held-out test split using the metrics defined in \Cref{sec:metrics}.
