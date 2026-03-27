@@ -69,7 +69,7 @@ gbt:
   min_samples_leaf: 20
 
 baselines:
-  tune: false              # set true to run Optuna temporal CV tuning
+  tune: true               # Optuna temporal CV tuning (30 trials, 3-fold expanding-window)
   n_trials: 30
   n_cv_splits: 3
   xgboost_search:
@@ -93,6 +93,7 @@ training:
   weight_decay: 1.0e-5
   patience: 10       # early stopping patience (epochs)
   seed: 42
+  seeds: [42, 123, 456]  # random seeds for multi-seed FT-Transformer variance estimation
 
 rolling_split:
   first_train_end: "2014-12-31"
