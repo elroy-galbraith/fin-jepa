@@ -784,6 +784,15 @@ def run_multiseed_benchmark(config, seeds: list | None = None) -> dict:
                 cat_cardinalities=cat_cards,
             ).to(device)
 
+            # Load SSL pretrained weights if checkpoint path is provided
+            ssl_ckpt = _cfg(config, "ssl_checkpoint", None)
+            if ssl_ckpt is not None:
+                ckpt_path = Path(ssl_ckpt)
+                if ckpt_path.exists():
+                    ssl_state = torch.load(ckpt_path, map_location=device)
+                    ft_model.load_state_dict(ssl_state, strict=False)
+                    log.info("  Loaded SSL checkpoint: %s", ckpt_path)
+
             optimizer = torch.optim.AdamW(ft_model.parameters(), lr=lr, weight_decay=wd)
             criterion = nn.BCEWithLogitsLoss(
                 pos_weight=torch.tensor([pos_weight], device=device),
