@@ -896,10 +896,15 @@ def run_walk_forward(config) -> dict:
     if universe_path.exists() and feat_cfg.use_sic:
         universe_df = pd.read_parquet(universe_path)
 
-    # Fit normalisation on earliest training window only (no future leakage)
+    # Fit normalisation on data up to the main benchmark's train_end.
+    # Using first_train_end alone can produce an empty training split if
+    # the dataset starts after that date; the standard train_end (2017)
+    # gives the scaler enough data while still avoiding future leakage
+    # (all walk-forward test folds start after 2017).
+    scaler_train_end = _cfg(config, "data.split.train_end", "2017-12-31")
     norm_split_cfg = SplitConfig(
-        train_end=rolling_cfg.first_train_end,
-        val_end=rolling_cfg.first_train_end,   # empty val — just to anchor scaler
+        train_end=scaler_train_end,
+        val_end=scaler_train_end,   # empty val — just to anchor scaler
         test_end=rolling_cfg.last_test_end,
     )
     _splits_norm, _scaler, feature_cols, categorical_cols = build_feature_matrix(

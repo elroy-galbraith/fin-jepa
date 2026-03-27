@@ -394,14 +394,21 @@ class FeatureScaler:
 
         if self.method == "quantile":
             n_samples = len(work)
-            n_quantiles = min(1000, n_samples)
-            if n_quantiles < 2:
-                n_quantiles = 2
-            self._qt = QuantileTransformer(
-                output_distribution="normal",
-                n_quantiles=n_quantiles,
-            )
-            self._qt.fit(work.values)
+            if n_samples == 0:
+                logger.warning(
+                    "FeatureScaler.fit: 0 training samples — "
+                    "QuantileTransformer will pass through values unchanged."
+                )
+                self._qt = None
+            else:
+                n_quantiles = min(1000, n_samples)
+                if n_quantiles < 2:
+                    n_quantiles = 2
+                self._qt = QuantileTransformer(
+                    output_distribution="normal",
+                    n_quantiles=n_quantiles,
+                )
+                self._qt.fit(work.values)
         elif self.method == "zscore":
             for col in cols_present:
                 self._mean[col] = float(work[col].mean())
