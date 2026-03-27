@@ -30,7 +30,7 @@ from fin_jepa.data.feature_engineering import (
     build_feature_matrix,
 )
 from fin_jepa.data.labels import load_label_database
-from fin_jepa.data.splits import SplitConfig
+from fin_jepa.data.splits import RollingSplitConfig, SplitConfig, make_rolling_splits
 from fin_jepa.data.xbrl_loader import load_xbrl_features
 from fin_jepa.models.baselines import (
     build_gbt,
@@ -663,6 +663,378 @@ def run_benchmark(config) -> dict:
             mlflow.log_artifact(str(results_path))
     except Exception as exc:
         log.debug("MLflow logging skipped: %s", exc)
+
+    return output
+
+
+# ── Multi-seed FT-Transformer variance estimation ────────────────────────
+
+
+def run_multiseed_benchmark(config, seeds: list | None = None) -> dict:
+    """Run FT-Transformer across multiple random seeds; report mean ± std AUROC.
+
+    Baselines are deterministic and not re-run.  Seeds control model
+    initialisation and dataloader shuffle order.
+
+    Parameters
+    ----------
+    config : dict or DictConfig
+    seeds : list[int] or None
+        Override seeds list; falls back to ``training.seeds`` in config,
+        then ``[42, 123, 456]``.
+
+    Returns
+    -------
+    dict with keys ``multiseed`` (per-outcome stats) and ``seeds``.
+    """
+    if seeds is None:
+        seeds = list(_cfg(config, "training.seeds", [42, 123, 456]))
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log.info("Multi-seed benchmark | seeds=%s | device=%s", seeds, device)
+
+    # ── Load data ────────────────────────────────────────────────────
+    raw_dir = Path(_cfg(config, "data.raw_dir", "data/raw"))
+    processed_dir = Path(_cfg(config, "data.processed_dir", "data/processed"))
+    xbrl_df = load_xbrl_features(raw_dir)
+    labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
+    xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
+    labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
+    merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
+
+    split_cfg = SplitConfig(
+        train_end=_cfg(config, "data.split.train_end", "2017-12-31"),
+        val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
+        test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
+    )
+    feat_cfg = FeatureConfig(
+        use_raw=_cfg(config, "features.use_raw", True),
+        use_ratios=_cfg(config, "features.use_ratios", True),
+        use_yoy=_cfg(config, "features.use_yoy", True),
+        use_sic=_cfg(config, "features.use_sic", True),
+        use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
+        coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
+        normalization_method=_cfg(config, "features.normalization_method", "quantile"),
+        median_impute=_cfg(config, "features.median_impute", True),
+    )
+    universe_df = None
+    universe_path = raw_dir / "company_universe.parquet"
+    if universe_path.exists() and feat_cfg.use_sic:
+        universe_df = pd.read_parquet(universe_path)
+
+    splits, _scaler, feature_cols, categorical_cols = build_feature_matrix(
+        merged, split_cfg, feat_cfg, universe_df=universe_df,
+    )
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
+    outcomes = _cfg(config, "outcomes", [
+        "stock_decline", "earnings_restate", "audit_qualification",
+        "sec_enforcement", "bankruptcy",
+    ])
+    batch_size = int(_cfg(config, "training.batch_size", 256))
+    epochs = int(_cfg(config, "training.epochs", 100))
+    lr = float(_cfg(config, "training.learning_rate", 1e-4))
+    wd = float(_cfg(config, "training.weight_decay", 1e-5))
+    patience_val = int(_cfg(config, "training.patience", 10))
+
+    # per_seed_auroc[outcome] = list of test AUROC values, one per seed
+    per_seed_auroc: dict[str, list[float]] = {oc: [] for oc in outcomes}
+
+    for seed in seeds:
+        log.info("─── Seed %d ───────────────────────────────────────────", seed)
+        seed_everything(seed)
+
+        for outcome in outcomes:
+            if outcome not in splits["train"].columns:
+                continue
+
+            train_valid = splits["train"][splits["train"][outcome].notna()]
+            val_valid = splits["val"][splits["val"][outcome].notna()]
+            test_valid = splits["test"][splits["test"][outcome].notna()]
+
+            n_pos_train = int(train_valid[outcome].sum())
+            n_neg_train = len(train_valid) - n_pos_train
+            if n_pos_train < MIN_POSITIVES:
+                continue
+
+            pos_weight = n_neg_train / max(n_pos_train, 1)
+
+            train_loader = make_dataloader(
+                train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
+                cat_feature_cols=categorical_cols or None,
+            )
+            val_loader = make_dataloader(
+                val_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
+                cat_feature_cols=categorical_cols or None,
+            )
+            test_loader = make_dataloader(
+                test_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
+                cat_feature_cols=categorical_cols or None,
+            )
+
+            ft_model = FTTransformer(
+                n_features=len(feature_cols),
+                d_token=int(_cfg(config, "ft_transformer.d_token", 192)),
+                n_heads=int(_cfg(config, "ft_transformer.n_heads", 8)),
+                n_layers=int(_cfg(config, "ft_transformer.n_layers", 3)),
+                d_ffn_factor=int(_cfg(config, "ft_transformer.d_ffn_factor", 4)),
+                dropout=float(_cfg(config, "ft_transformer.dropout", 0.0)),
+                n_outputs=1,
+                n_cat_features=n_cat,
+                cat_cardinalities=cat_cards,
+            ).to(device)
+
+            optimizer = torch.optim.AdamW(ft_model.parameters(), lr=lr, weight_decay=wd)
+            criterion = nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor([pos_weight], device=device),
+            )
+            train_ft_transformer(
+                ft_model, train_loader, val_loader, criterion, optimizer,
+                device, epochs=epochs, patience=patience_val,
+            )
+            ft_y_true, ft_y_score = _predict_scores(ft_model, test_loader, device)
+            if len(np.unique(ft_y_true)) < 2:
+                continue
+            test_auroc = float(roc_auc_score(ft_y_true, ft_y_score))
+            per_seed_auroc[outcome].append(test_auroc)
+            log.info("  Seed %d | %s | test AUROC: %.4f", seed, outcome, test_auroc)
+
+    # ── Aggregate ────────────────────────────────────────────────────
+    aggregated: dict[str, dict] = {}
+    for outcome in outcomes:
+        aurocs = per_seed_auroc[outcome]
+        if aurocs:
+            aggregated[outcome] = {
+                "mean_auroc": float(np.mean(aurocs)),
+                "std_auroc": float(np.std(aurocs)),
+                "seeds": list(seeds[: len(aurocs)]),
+                "per_seed_auroc": {str(s): a for s, a in zip(seeds, aurocs)},
+            }
+            log.info(
+                "  %s | mean=%.4f ± %.4f (n=%d seeds)",
+                outcome,
+                aggregated[outcome]["mean_auroc"],
+                aggregated[outcome]["std_auroc"],
+                len(aurocs),
+            )
+
+    output: dict = {"multiseed": aggregated, "seeds": list(seeds)}
+
+    results_dir = Path(_cfg(config, "results_dir", "results/study0"))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    out_path = results_dir / "multiseed_results.json"
+    with open(out_path, "w") as f:
+        json.dump(output, f, indent=2)
+    log.info("Multi-seed results saved to %s", out_path)
+
+    return output
+
+
+# ── Walk-forward (expanding-window) validation ───────────────────────────
+
+
+def run_walk_forward(config) -> dict:
+    """Evaluate XGBoost and FT-Transformer across expanding-window folds.
+
+    Uses ``rolling_split`` section from benchmark.yaml to generate folds from
+    ``first_train_end`` to ``last_test_end``.  Each fold expands the training
+    window by ``step_years`` and evaluates on a ``test_window_years``-wide
+    held-out window.
+
+    Feature normalisation is fit once on data up to ``first_train_end`` so
+    that future data never contaminates the scaler (conservative choice).
+
+    Returns
+    -------
+    dict with ``walk_forward_folds`` (list of per-fold per-outcome results)
+    and ``n_folds``.
+    """
+    seed = int(_cfg(config, "training.seed", 42))
+    seed_everything(seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log.info("Walk-forward validation | device=%s", device)
+
+    # ── Load data ────────────────────────────────────────────────────
+    raw_dir = Path(_cfg(config, "data.raw_dir", "data/raw"))
+    processed_dir = Path(_cfg(config, "data.processed_dir", "data/processed"))
+    xbrl_df = load_xbrl_features(raw_dir)
+    labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
+    xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
+    labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
+    merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
+
+    # ── Rolling split config ─────────────────────────────────────────
+    rolling_cfg = RollingSplitConfig(
+        first_train_end=_cfg(config, "rolling_split.first_train_end", "2014-12-31"),
+        val_window_years=int(_cfg(config, "rolling_split.val_window_years", 1)),
+        test_window_years=int(_cfg(config, "rolling_split.test_window_years", 2)),
+        step_years=int(_cfg(config, "rolling_split.step_years", 1)),
+        last_test_end=_cfg(config, "rolling_split.last_test_end", "2023-12-31"),
+    )
+
+    feat_cfg = FeatureConfig(
+        use_raw=_cfg(config, "features.use_raw", True),
+        use_ratios=_cfg(config, "features.use_ratios", True),
+        use_yoy=_cfg(config, "features.use_yoy", True),
+        use_sic=_cfg(config, "features.use_sic", True),
+        use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
+        coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
+        normalization_method=_cfg(config, "features.normalization_method", "quantile"),
+        median_impute=_cfg(config, "features.median_impute", True),
+    )
+    universe_df = None
+    universe_path = raw_dir / "company_universe.parquet"
+    if universe_path.exists() and feat_cfg.use_sic:
+        universe_df = pd.read_parquet(universe_path)
+
+    # Fit normalisation on earliest training window only (no future leakage)
+    norm_split_cfg = SplitConfig(
+        train_end=rolling_cfg.first_train_end,
+        val_end=rolling_cfg.first_train_end,   # empty val — just to anchor scaler
+        test_end=rolling_cfg.last_test_end,
+    )
+    _splits_norm, _scaler, feature_cols, categorical_cols = build_feature_matrix(
+        merged, norm_split_cfg, feat_cfg, universe_df=universe_df,
+    )
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
+
+    # Reconstruct a single normalised dataframe covering all dates
+    full_normalized = (
+        pd.concat([_splits_norm["train"], _splits_norm["val"], _splits_norm["test"]])
+        .sort_values("period_end")
+        .reset_index(drop=True)
+    )
+
+    rolling_folds = make_rolling_splits(full_normalized, rolling_cfg)
+    log.info("Walk-forward: %d folds generated", len(rolling_folds))
+
+    outcomes = _cfg(config, "outcomes", [
+        "stock_decline", "earnings_restate", "audit_qualification",
+        "sec_enforcement", "bankruptcy",
+    ])
+    batch_size = int(_cfg(config, "training.batch_size", 256))
+    epochs = int(_cfg(config, "training.epochs", 100))
+    lr_rate = float(_cfg(config, "training.learning_rate", 1e-4))
+    wd = float(_cfg(config, "training.weight_decay", 1e-5))
+    patience_val = int(_cfg(config, "training.patience", 10))
+
+    fold_results: list[dict] = []
+
+    for fold_idx, fold in enumerate(rolling_folds):
+        train_fold = fold["train"]
+        val_fold = fold["val"]
+        test_fold = fold["test"]
+
+        if len(train_fold) == 0 or len(test_fold) == 0:
+            continue
+
+        train_dates = pd.to_datetime(train_fold["period_end"])
+        test_dates = pd.to_datetime(test_fold["period_end"])
+        fold_label = (
+            f"train≤{train_dates.max().year}"
+            f" → test {test_dates.min().year}–{test_dates.max().year}"
+        )
+        log.info("Fold %d: %s", fold_idx, fold_label)
+
+        fold_outcome_results: dict[str, dict] = {}
+        for outcome in outcomes:
+            if outcome not in train_fold.columns:
+                continue
+
+            train_valid = train_fold[train_fold[outcome].notna()]
+            val_valid = val_fold[val_fold[outcome].notna()]
+            test_valid = test_fold[test_fold[outcome].notna()]
+
+            n_pos_train = int(train_valid[outcome].sum())
+            n_neg_train = len(train_valid) - n_pos_train
+            if n_pos_train < MIN_POSITIVES or len(test_valid) == 0:
+                continue
+            if len(np.unique(test_valid[outcome].to_numpy())) < 2:
+                continue
+
+            pos_weight = n_neg_train / max(n_pos_train, 1)
+
+            # --- XGBoost ---
+            X_train = np.nan_to_num(train_valid[feature_cols].to_numpy(dtype=np.float32), nan=0.0)
+            y_train = train_valid[outcome].to_numpy(dtype=np.float32)
+            X_test = np.nan_to_num(test_valid[feature_cols].to_numpy(dtype=np.float32), nan=0.0)
+            y_test = test_valid[outcome].to_numpy(dtype=np.float32)
+
+            xgb_model = build_xgboost(
+                n_estimators=int(_cfg(config, "xgboost.n_estimators", 500)),
+                learning_rate=float(_cfg(config, "xgboost.learning_rate", 0.05)),
+                max_depth=int(_cfg(config, "xgboost.max_depth", 6)),
+                subsample=float(_cfg(config, "xgboost.subsample", 0.8)),
+                colsample_bytree=float(_cfg(config, "xgboost.colsample_bytree", 0.8)),
+                scale_pos_weight=pos_weight,
+            )
+            xgb_model.fit(X_train, y_train)
+            xgb_scores = xgb_model.predict_proba(X_test)[:, 1]
+            xgb_auroc = float(roc_auc_score(y_test, xgb_scores))
+
+            # --- FT-Transformer ---
+            eff_val = val_valid if len(val_valid) > 0 else train_valid
+            train_loader = make_dataloader(
+                train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
+                cat_feature_cols=categorical_cols or None,
+            )
+            val_loader = make_dataloader(
+                eff_val, feature_cols, outcome, batch_size=batch_size, shuffle=False,
+                cat_feature_cols=categorical_cols or None,
+            )
+            test_loader = make_dataloader(
+                test_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
+                cat_feature_cols=categorical_cols or None,
+            )
+
+            ft_model = FTTransformer(
+                n_features=len(feature_cols),
+                d_token=int(_cfg(config, "ft_transformer.d_token", 192)),
+                n_heads=int(_cfg(config, "ft_transformer.n_heads", 8)),
+                n_layers=int(_cfg(config, "ft_transformer.n_layers", 3)),
+                d_ffn_factor=int(_cfg(config, "ft_transformer.d_ffn_factor", 4)),
+                dropout=float(_cfg(config, "ft_transformer.dropout", 0.0)),
+                n_outputs=1,
+                n_cat_features=n_cat,
+                cat_cardinalities=cat_cards,
+            ).to(device)
+
+            optimizer = torch.optim.AdamW(ft_model.parameters(), lr=lr_rate, weight_decay=wd)
+            criterion = nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor([pos_weight], device=device),
+            )
+            train_ft_transformer(
+                ft_model, train_loader, val_loader, criterion, optimizer,
+                device, epochs=epochs, patience=patience_val,
+            )
+            ft_y_true, ft_y_score = _predict_scores(ft_model, test_loader, device)
+            ft_auroc = (
+                float(roc_auc_score(ft_y_true, ft_y_score))
+                if len(np.unique(ft_y_true)) >= 2
+                else float("nan")
+            )
+
+            fold_outcome_results[outcome] = {
+                "xgb_auroc": xgb_auroc,
+                "ft_auroc": ft_auroc,
+            }
+            log.info("  %s | XGB=%.4f FT=%.4f", outcome, xgb_auroc, ft_auroc)
+
+        fold_results.append({
+            "fold": fold_idx,
+            "label": fold_label,
+            "outcomes": fold_outcome_results,
+        })
+
+    output: dict = {"walk_forward_folds": fold_results, "n_folds": len(fold_results)}
+
+    results_dir = Path(_cfg(config, "results_dir", "results/study0"))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    out_path = results_dir / "walk_forward_results.json"
+    with open(out_path, "w") as f:
+        json.dump(output, f, indent=2, default=str)
+    log.info("Walk-forward results saved to %s", out_path)
 
     return output
 
