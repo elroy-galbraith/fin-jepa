@@ -203,7 +203,7 @@ Against default-hyperparameter XGBoost, the FT-Transformer is directionally posi
   \end{tabular}
 \end{table}
 
-\textbf{Gate result.} Against default baselines, the gate criterion is met (4/4 directionally positive, 2/4 statistically significant at $p < 0.05$; see bootstrap analysis below). Against Optuna-tuned baselines, the strict AUROC gate is \emph{not} met (2/4 wins). Tuned XGBoost closes the gap on \texttt{stock\_decline} and substantially exceeds the FT-Transformer on \texttt{sec\_enforcement}, the lowest-base-rate outcome. The FT-Transformer retains clear wins on \texttt{earnings\_restate} and \texttt{bankruptcy}.
+\textbf{Gate result.} Against default baselines, the gate criterion is met (4/4 directionally positive, 2/4 statistically significant at $p < 0.05$; see bootstrap analysis below). Against Optuna-tuned baselines, the AUROC gate is \emph{not} met (2/4 wins). Tuned XGBoost closes the gap on \texttt{stock\_decline} and substantially exceeds the FT-Transformer on \texttt{sec\_enforcement}, the lowest-base-rate outcome. The FT-Transformer retains clear wins on \texttt{earnings\_restate} and \texttt{bankruptcy}.
 
 \Cref{fig:final_benchmark} shows test AUROC for all six models (default baselines) across the four outcomes, and \Cref{fig:bootstrap_ci} presents paired bootstrap 95\% confidence intervals on the AUROC difference (FT minus default XGBoost).
 

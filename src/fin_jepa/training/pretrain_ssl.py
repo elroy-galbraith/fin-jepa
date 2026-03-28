@@ -234,7 +234,13 @@ _DEFAULT_OUTCOMES = [
 ]
 
 
-def run_ssl_experiment(config) -> dict:
+def run_ssl_experiment(
+    config,
+    *,
+    prebuilt_splits: dict | None = None,
+    prebuilt_feature_cols: list[str] | None = None,
+    prebuilt_cat_cols: list[str] | None = None,
+) -> dict:
     """Run the full SSL pretraining experiment (ATS-167).
 
     For each mask ratio, pretrain an encoder (200 epochs, warmup + cosine),
@@ -245,6 +251,16 @@ def run_ssl_experiment(config) -> dict:
     ----------
     config : dict or DictConfig
         Hydra configuration (from ``configs/study0/ssl_experiment.yaml``).
+    prebuilt_splits : dict, optional
+        Pre-built ``{train, val, test}`` DataFrames from
+        ``build_feature_matrix``.  When provided, the function skips
+        internal data loading and reuses the caller's preprocessing
+        pipeline — ensuring scratch baselines are identical across
+        experiments (ATS-217).
+    prebuilt_feature_cols : list[str], optional
+        Continuous feature columns matching *prebuilt_splits*.
+    prebuilt_cat_cols : list[str], optional
+        Categorical feature columns matching *prebuilt_splits*.
 
     Returns
     -------
@@ -261,40 +277,48 @@ def run_ssl_experiment(config) -> dict:
     log.info("SSL experiment — device: %s", device)
 
     # ── Load data ────────────────────────────────────────────────────
-    raw_dir = Path(_cfg(config, "data.raw_dir", "data/raw"))
-    processed_dir = Path(_cfg(config, "data.processed_dir", "data/processed"))
+    if prebuilt_splits is not None:
+        # Reuse caller's preprocessing pipeline (ATS-217: eliminates
+        # QuantileTransformer divergence between benchmark and SSL tables).
+        splits = prebuilt_splits
+        feature_cols = prebuilt_feature_cols or []
+        categorical_cols = prebuilt_cat_cols or []
+        log.info("SSL experiment: using prebuilt splits (%d train rows).", len(splits["train"]))
+    else:
+        raw_dir = Path(_cfg(config, "data.raw_dir", "data/raw"))
+        processed_dir = Path(_cfg(config, "data.processed_dir", "data/processed"))
 
-    xbrl_df = load_xbrl_features(raw_dir)
-    labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
-    xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
-    labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
-    merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
+        xbrl_df = load_xbrl_features(raw_dir)
+        labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
+        xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
+        labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
+        merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
 
-    split_cfg = SplitConfig(
-        train_end=_cfg(config, "data.split.train_end", "2017-12-31"),
-        val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
-        test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
-    )
-    feat_cfg = FeatureConfig(
-        use_raw=_cfg(config, "features.use_raw", True),
-        use_ratios=_cfg(config, "features.use_ratios", True),
-        use_yoy=_cfg(config, "features.use_yoy", True),
-        use_sic=_cfg(config, "features.use_sic", True),
-        use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
-        coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
-        normalization_method=_cfg(config, "features.normalization_method", "quantile"),
-        median_impute=_cfg(config, "features.median_impute", True),
-    )
+        split_cfg = SplitConfig(
+            train_end=_cfg(config, "data.split.train_end", "2017-12-31"),
+            val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
+            test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
+        )
+        feat_cfg = FeatureConfig(
+            use_raw=_cfg(config, "features.use_raw", True),
+            use_ratios=_cfg(config, "features.use_ratios", True),
+            use_yoy=_cfg(config, "features.use_yoy", True),
+            use_sic=_cfg(config, "features.use_sic", True),
+            use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
+            coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
+            normalization_method=_cfg(config, "features.normalization_method", "quantile"),
+            median_impute=_cfg(config, "features.median_impute", True),
+        )
 
-    # Load universe for SIC join
-    universe_df = None
-    universe_path = raw_dir / "company_universe.parquet"
-    if universe_path.exists() and feat_cfg.use_sic:
-        universe_df = pd.read_parquet(universe_path)
+        # Load universe for SIC join
+        universe_df = None
+        universe_path = raw_dir / "company_universe.parquet"
+        if universe_path.exists() and feat_cfg.use_sic:
+            universe_df = pd.read_parquet(universe_path)
 
-    splits, scaler, feature_cols, categorical_cols = build_feature_matrix(
-        merged, split_cfg, feat_cfg, universe_df=universe_df,
-    )
+        splits, scaler, feature_cols, categorical_cols = build_feature_matrix(
+            merged, split_cfg, feat_cfg, universe_df=universe_df,
+        )
 
     n_features = len(feature_cols)
     n_cat = len(categorical_cols)
