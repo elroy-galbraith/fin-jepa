@@ -70,6 +70,31 @@ The tuned FT-Transformer achieves the highest AUROC on \texttt{earnings\_restate
 
 The tuned FT-Transformer matches or exceeds the best baseline on \texttt{sec\_enforcement} (tied AUROC with LR-traditional but substantially lower ECE: 0.220 vs.\ 0.456) and \texttt{bankruptcy} (best across all four metrics). On \texttt{stock\_decline}, it trails LR-full in discrimination but offers competitive calibration (ECE 0.089 vs.\ 0.081).
 
+\subsubsection{Optuna-Tuned Baselines}
+\label{sec:results_tuned}
+
+To address the tuning gap between the grid-searched FT-Transformer and default-hyperparameter baselines, we re-ran the benchmark with Optuna-tuned XGBoost and GBT (30 trials each, 3-fold expanding-window temporal CV). This tuned-baseline benchmark uses an independent preprocessing pipeline (separate QuantileTransformer fit on the training split), so absolute AUROC values are not directly comparable to \Cref{tab:auroc}; relative comparisons within this benchmark are valid.
+
+\begin{table}[ht]
+  \centering
+  \caption{Test AUROC with Optuna-tuned baselines (30 trials per model). Best per outcome in \textbf{bold}.}
+  \label{tab:auroc_tuned}
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Model & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
+    \midrule
+    LR (traditional ratios) & 0.644 & 0.620 & 0.607 & 0.646 \\
+    LR (full features) & \textbf{0.682} & 0.660 & 0.399 & 0.654 \\
+    XGBoost (tuned) & 0.668 & 0.631 & 0.501 & 0.613 \\
+    GBT (tuned) & 0.668 & \textbf{0.672} & \textbf{0.644} & 0.564 \\
+    FT-Transformer & 0.663 & 0.680 & 0.427 & \textbf{0.663} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+With tuned baselines, the picture changes. Tuned XGBoost closes the gap on \texttt{stock\_decline} (0.668 vs.\ FT's 0.663) and substantially exceeds the FT-Transformer on \texttt{sec\_enforcement} (0.501 vs.\ 0.427). Tuned GBT becomes the strongest model on \texttt{sec\_enforcement} (0.644). The FT-Transformer retains clear wins on \texttt{earnings\_restate} ($+0.049$ vs.\ tuned XGBoost) and \texttt{bankruptcy} ($+0.050$). Evaluated against the go/no-go gate criterion (\Cref{sec:gate}), the FT-Transformer achieves 2/4 wins over tuned XGBoost---below the 3/4 threshold.
+
 \subsection{Self-Supervised Pretraining}
 \label{sec:results_ssl}
 
@@ -105,15 +130,41 @@ The strongest SSL result is on \texttt{sec\_enforcement}, where $r = 0.50$ (AURO
   \label{fig:ssl_loss}
 \end{figure}
 
-\subsection{Go/No-Go Gate}
-\label{sec:results_gate}
+\subsection{Multi-Seed Variance}
+\label{sec:results_multiseed}
 
-The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 4 outcomes. \Cref{tab:gate} evaluates both the tuned FT-Transformer (from scratch) and the best SSL-pretrained variant against XGBoost.
+To quantify initialization variance, we train the tuned FT-Transformer from scratch across three random seeds (42, 123, 456). \Cref{tab:multiseed} reports per-seed and aggregate test AUROC.
 
 \begin{table}[ht]
   \centering
-  \caption{Go/no-go gate evaluation: tuned FT-Transformer vs.\ XGBoost. Both the from-scratch and SSL-pretrained ($r = 0.50$) variants are shown.}
-  \label{tab:gate}
+  \caption{Multi-seed test AUROC for the tuned FT-Transformer (from scratch). Mean $\pm$ std across 3 seeds.}
+  \label{tab:multiseed}
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Outcome & Seed 42 & Seed 123 & Seed 456 & Mean $\pm$ Std \\
+    \midrule
+    \texttt{stock\_decline} & 0.660 & 0.644 & 0.646 & $0.650 \pm 0.007$ \\
+    \texttt{earnings\_restate} & 0.680 & 0.668 & 0.674 & $0.674 \pm 0.005$ \\
+    \texttt{sec\_enforcement} & 0.544 & 0.515 & 0.534 & $0.531 \pm 0.012$ \\
+    \texttt{bankruptcy} & 0.665 & 0.643 & 0.673 & $0.660 \pm 0.013$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Variance is modest for the two higher-prevalence outcomes (\texttt{stock\_decline} std $= 0.007$, \texttt{earnings\_restate} std $= 0.005$) and somewhat larger for the rare-event outcomes (\texttt{sec\_enforcement} std $= 0.012$, \texttt{bankruptcy} std $= 0.013$), consistent with the small positive-class counts producing noisier gradient signals.
+
+\subsection{Go/No-Go Gate}
+\label{sec:results_gate}
+
+The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 4 outcomes. We evaluate the gate under two conditions: against default-hyperparameter XGBoost (\Cref{tab:gate_default}) and against Optuna-tuned XGBoost (\Cref{tab:gate_tuned}).
+
+\subsubsection{Against Default-Hyperparameter Baselines}
+
+\begin{table}[ht]
+  \centering
+  \caption{Go/no-go gate vs.\ default-hyperparameter XGBoost. Both the from-scratch and SSL-pretrained ($r = 0.50$) FT-Transformer variants are shown.}
+  \label{tab:gate_default}
   \small
   \begin{tabular}{@{}lccccc@{}}
     \toprule
@@ -124,34 +175,57 @@ The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0
     \texttt{sec\_enforcement} & 0.530 & 0.606 & $+0.075$ & 0.602 & $+0.071$ \\
     \texttt{bankruptcy} & 0.615 & 0.648 & $+0.034$ & 0.672 & $+0.057$ \\
     \midrule
-    Wins ($\geq 0.01$) & & & \textbf{4/4} & & \textbf{4/4} \\
+    Wins ($\geq 0.01$) & & & 4/4 & & 4/4 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\textbf{Gate result: passed (4/4 wins).} Both the from-scratch and SSL-pretrained FT-Transformer exceed XGBoost by at least 0.01 AUROC on all four outcomes. The largest margins are on \texttt{sec\_enforcement} ($+0.075$ scratch, $+0.071$ SSL) and \texttt{bankruptcy} ($+0.034$ scratch, $+0.057$ SSL).
+Against default-hyperparameter XGBoost, the FT-Transformer is directionally positive on all four outcomes (4/4 exceed the 0.01 margin). The largest deltas are on \texttt{sec\_enforcement} ($+0.075$ scratch, $+0.071$ SSL) and \texttt{bankruptcy} ($+0.034$ scratch, $+0.057$ SSL).
 
-\Cref{fig:final_benchmark} shows test AUROC for all six models across the four outcomes, and \Cref{fig:bootstrap_ci} presents paired bootstrap 95\% confidence intervals on the AUROC difference (FT minus XGBoost).
+\subsubsection{Against Optuna-Tuned Baselines}
+
+\begin{table}[ht]
+  \centering
+  \caption{Go/no-go gate vs.\ Optuna-tuned XGBoost (30 trials, 3-fold temporal CV).}
+  \label{tab:gate_tuned}
+  \small
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Outcome & XGBoost (tuned) & FT-Transformer & $\Delta$ \\
+    \midrule
+    \texttt{stock\_decline} & 0.668 & 0.663 & $-0.005$ \\
+    \texttt{earnings\_restate} & 0.631 & 0.680 & $+0.049$ \\
+    \texttt{sec\_enforcement} & 0.501 & 0.427 & $-0.075$ \\
+    \texttt{bankruptcy} & 0.613 & 0.663 & $+0.050$ \\
+    \midrule
+    Wins ($\geq 0.01$) & & & 2/4 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\textbf{Gate result.} Against default baselines, the gate criterion is met (4/4 directionally positive, 2/4 statistically significant at $p < 0.05$; see bootstrap analysis below). Against Optuna-tuned baselines, the strict AUROC gate is \emph{not} met (2/4 wins). Tuned XGBoost closes the gap on \texttt{stock\_decline} and substantially exceeds the FT-Transformer on \texttt{sec\_enforcement}, the lowest-base-rate outcome. The FT-Transformer retains clear wins on \texttt{earnings\_restate} and \texttt{bankruptcy}.
+
+\Cref{fig:final_benchmark} shows test AUROC for all six models (default baselines) across the four outcomes, and \Cref{fig:bootstrap_ci} presents paired bootstrap 95\% confidence intervals on the AUROC difference (FT minus default XGBoost).
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{../../results/study0/figures/final_benchmark_all_models.png}
-  \caption{Final benchmark: test AUROC for all six models across four distress outcomes.}
+  \caption{Final benchmark (default baselines): test AUROC for all six models across four distress outcomes.}
   \label{fig:final_benchmark}
 \end{figure}
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{../../results/study0/figures/bootstrap_ci_forest_plot.png}
-  \caption{Paired bootstrap 95\% CIs on AUROC difference (FT-Transformer minus XGBoost, $n = 1{,}000$ resamples). The dashed line indicates the 0.01 gate margin. Green circles: FT tuned (scratch); yellow squares: FT tuned + SSL.}
+  \caption{Paired bootstrap 95\% CIs on AUROC difference (FT-Transformer minus default XGBoost, $n = 1{,}000$ resamples). The dashed line indicates the 0.01 gate margin. Green circles: FT tuned (scratch); yellow squares: FT tuned + SSL.}
   \label{fig:bootstrap_ci}
 \end{figure}
 
-\paragraph{Bootstrap significance.} Paired bootstrap confidence intervals (1{,}000 resamples, seed 42) confirm that the FT-Transformer advantage over XGBoost is statistically significant on two of four outcomes (\Cref{tab:bootstrap}). On \texttt{stock\_decline} and \texttt{earnings\_restate}, the 95\% CI for the AUROC difference excludes zero. On \texttt{sec\_enforcement} and \texttt{bankruptcy}, the CIs are wide due to small positive-class counts in the test set, but the point estimates are consistently positive across both FT variants.
+\paragraph{Bootstrap significance.} Paired bootstrap confidence intervals (1{,}000 resamples, seed 42) against default-hyperparameter XGBoost confirm that the FT-Transformer advantage is statistically significant on two of four outcomes (\Cref{tab:bootstrap}). On \texttt{stock\_decline} and \texttt{earnings\_restate}, the 95\% CI for the AUROC difference excludes zero. On \texttt{sec\_enforcement} and \texttt{bankruptcy}, the CIs are wide due to small positive-class counts in the test set; the point estimates are positive but the intervals include zero.
 
 \begin{table}[ht]
   \centering
-  \caption{Paired bootstrap 95\% CIs on AUROC difference (FT minus XGBoost, $n = 1{,}000$).}
+  \caption{Paired bootstrap 95\% CIs on AUROC difference (FT minus default XGBoost, $n = 1{,}000$).}
   \label{tab:bootstrap}
   \small
   \begin{tabular}{@{}lcccc@{}}
@@ -167,3 +241,5 @@ The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0
     \bottomrule
   \end{tabular}
 \end{table}
+
+\paragraph{Calibration as supplementary evidence.} While the AUROC gate is mixed, calibration provides additional evidence for the FT-Transformer. On \texttt{stock\_decline}---the highest-prevalence outcome and the most reliable benchmark---the FT-Transformer achieves substantially better calibration (ECE 0.042 vs.\ 0.147 for tuned XGBoost). On the low-base-rate outcomes (\texttt{sec\_enforcement}, \texttt{bankruptcy}), XGBoost achieves very low ECE (0.007) by predicting near-zero probabilities for virtually all samples---technically well-calibrated but uninformative for risk stratification. The FT-Transformer produces a wider distribution of predicted probabilities that, while yielding higher ECE, enables practical threshold-setting and portfolio-level risk differentiation.

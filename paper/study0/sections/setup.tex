@@ -28,7 +28,7 @@ All feature normalization statistics (medians, percentile bounds, quantile mappi
 
 Split sizes: 13{,}920 train / 5{,}657 validation / 14{,}160 test observations.
 
-As a robustness check, we also define a walk-forward evaluation scheme using expanding training windows. Starting with a train cutoff of 2014-12-31, each successive fold advances by one year, with a 1-year validation window and a 2-year test window, up to a final test boundary of 2023-12-31. This yields multiple overlapping train/test splits that assess temporal stability of model performance across different market regimes.
+As a robustness check, we also define a walk-forward evaluation scheme using expanding training windows. Starting with a train cutoff of 2014-12-31, each successive fold advances by one year, with a 1-year validation window and a 2-year test window, up to a final test boundary of 2023-12-31. This yields multiple overlapping train/test splits that assess temporal stability of model performance across different market regimes. In practice, the walk-forward evaluation was not completed: early time splits produced empty training partitions for some outcomes, causing the preprocessing pipeline to fail. The underlying bug has been fixed but the evaluation was not re-run for this study; walk-forward results are deferred to future work.
 
 \subsection{Evaluation Metrics}
 \label{sec:metrics}
@@ -46,11 +46,13 @@ We report the following metrics for each model--outcome pair, all computed on th
 
 For outcomes where the test split contains only one class (all positives or all negatives), all metrics return NaN and the outcome is excluded from aggregate comparisons.
 
+To quantify initialization variance, we report multi-seed results for the FT-Transformer across three random seeds (42, 123, 456). The primary results use seed 42; the multi-seed analysis (\Cref{sec:results_multiseed}) assesses the stability of conclusions across initializations.
+
 In addition to aggregate metrics, we report AUROC and AUPRC stratified by Fama--French 12-industry sector. This sector-level breakdown surfaces whether model performance is concentrated in specific industries (e.g., finance) or generalises across the full company universe. Sectors with fewer than 30 observations or only one class in the test split are excluded from the stratified analysis.
 
 \subsection{Go/No-Go Gate}
 \label{sec:gate}
 
-This study serves as a validation gate for subsequent work. The FT-Transformer passes the gate if it achieves AUROC at least 0.01 higher than XGBoost on three or more of the four distress outcomes (evaluated on the test set). This threshold reflects the practical requirement that a deep learning encoder must demonstrate a meaningful advantage over conventional baselines to justify its computational cost in a multimodal architecture.
+This study serves as a validation gate for subsequent work. The FT-Transformer passes the gate if it achieves AUROC at least 0.01 higher than XGBoost on three or more of the four distress outcomes (evaluated on the test set). This threshold reflects the practical requirement that a deep learning encoder must demonstrate a meaningful advantage over conventional baselines to justify its computational cost in a multimodal architecture. We evaluate the gate against both default-hyperparameter and Optuna-tuned XGBoost (30 trials, 3-fold expanding-window temporal CV) to assess sensitivity to the baseline tuning budget.
 
-We report 95\% confidence intervals on AUROC and pairwise AUROC differences using the Hanley--McNeil (1982) analytical standard error \citep{hanley1982meaning}. Paired bootstrap infrastructure is available (\texttt{bootstrap\_auroc\_ci}, 2{,}000 resamples) for future studies that store raw prediction arrays.
+We report 95\% confidence intervals on pairwise AUROC differences via paired bootstrap (1{,}000 resamples, seed 42).

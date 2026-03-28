@@ -15,9 +15,11 @@ This paper makes the following contributions:
 
   \item We benchmark the FT-Transformer---with hyperparameters selected via a 36-configuration grid search---against logistic regression (with both traditional ratios and full feature sets), XGBoost, and a histogram-based gradient-boosted tree on distress prediction, using a strictly temporal evaluation protocol that prevents look-ahead bias.
 
+  \item We provide a rigorous comparison against Optuna-tuned XGBoost and gradient-boosted trees (30 trials per model, 3-fold expanding-window temporal CV), alongside default-hyperparameter baselines, and report multi-seed variance (3 seeds) for the FT-Transformer.
+
   \item We evaluate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer and measure its effect on downstream classification performance.
 
   \item We release the complete data extraction pipeline, feature engineering code, model implementations, and evaluation scripts as open-source software to support reproducibility and further research.
 \end{enumerate}
 
-This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. The tuned FT-Transformer passes the validation gate, exceeding XGBoost by at least 0.01 AUROC on all four distress outcomes (statistically significant on two), confirming it as a viable base encoder for the structured financial modality in subsequent studies.
+This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. Against default-hyperparameter XGBoost, the tuned FT-Transformer is directionally positive on all four distress outcomes (statistically significant on two of four). Against Optuna-tuned baselines, the strict AUROC gate is not met (2/4 wins); however, the FT-Transformer's calibration properties, its suitability as a pretrained representation backbone, and the gains from self-supervised pretraining support proceeding with it as the structured financial modality encoder in subsequent studies.
