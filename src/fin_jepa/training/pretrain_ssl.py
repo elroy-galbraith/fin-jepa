@@ -349,6 +349,13 @@ def run_ssl_experiment(
     pretrain_warmup = int(_cfg(config, "pretrain.warmup_epochs", 10))
     pretrain_batch_size = int(_cfg(config, "pretrain.batch_size", 512))
 
+    # ATS-217: fine-tuning lr can be overridden via config so the SSL
+    # baseline matches the final-benchmark ft_scratch exactly.
+    finetune_lr = float(
+        _cfg(config, "training.learning_rate",
+             _BENCHMARK_DEFAULTS["learning_rate"])
+    )
+
     # ── FROM-SCRATCH BASELINE ────────────────────────────────────────
     log.info("Running from-scratch baseline on %d outcomes...", len(outcomes))
     baseline_results: dict[str, dict] = {}
@@ -358,6 +365,7 @@ def run_ssl_experiment(
         metrics = _train_and_evaluate(
             splits, feature_cols, outcome, device, model_kwargs,
             cat_feature_cols=categorical_cols,
+            lr=finetune_lr,
         )
         baseline_results[outcome] = metrics
 
@@ -414,6 +422,7 @@ def run_ssl_experiment(
                 splits, feature_cols, outcome, device, model_kwargs,
                 init_state_dict=state_dict,
                 cat_feature_cols=categorical_cols,
+                lr=finetune_lr,
             )
             pretrained_results[ratio_key][outcome] = metrics
 

@@ -280,6 +280,7 @@ def _train_and_evaluate(
     model_kwargs: dict,
     init_state_dict: dict | None = None,
     cat_feature_cols: list[str] | None = None,
+    lr: float | None = None,
 ) -> dict:
     """Train an FT-Transformer and return test metrics.
 
@@ -291,6 +292,9 @@ def _train_and_evaluate(
         classification head can differ.
     cat_feature_cols:
         Categorical feature column names to pass to the dataloader.
+    lr:
+        Learning rate override.  Falls back to
+        ``_BENCHMARK_DEFAULTS["learning_rate"]`` when *None*.
     """
     train_df = splits["train"][splits["train"][outcome].notna()]
     val_df = splits["val"][splits["val"][outcome].notna()]
@@ -313,9 +317,10 @@ def _train_and_evaluate(
     model = FTTransformer(**model_kwargs).to(device)
     if init_state_dict is not None:
         model.load_state_dict(init_state_dict, strict=False)
+    _lr = lr if lr is not None else _BENCHMARK_DEFAULTS["learning_rate"]
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=_BENCHMARK_DEFAULTS["learning_rate"],
+        lr=_lr,
         weight_decay=_BENCHMARK_DEFAULTS["weight_decay"],
     )
     criterion = nn.BCEWithLogitsLoss(
