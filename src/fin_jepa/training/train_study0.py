@@ -773,9 +773,12 @@ def run_multiseed_benchmark(
 
     for seed in seeds:
         log.info("─── Seed %d ───────────────────────────────────────────", seed)
-        seed_everything(seed)
 
         for outcome in outcomes:
+            # ATS-217: reset seed before *each* outcome so the random state
+            # at model-init time matches Cell 24 (final_benchmark), which
+            # also calls seed_everything(SEED) per outcome.
+            seed_everything(seed)
             if outcome not in splits["train"].columns:
                 continue
 
