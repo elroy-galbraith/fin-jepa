@@ -524,6 +524,10 @@ def run_benchmark(config) -> dict:
             log.warning("  No raw XBRL features available — skipping GBT.")
 
         # ── FT-Transformer ──────────────────────────────────────────
+        # ATS-217: reset seed so RNG state at model-init time matches
+        # run_multiseed_benchmark and run_ssl_experiment, which also
+        # call seed_everything(seed) immediately before DataLoader creation.
+        seed_everything(seed)
         train_loader = make_dataloader(
             train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
             cat_feature_cols=categorical_cols or None,
