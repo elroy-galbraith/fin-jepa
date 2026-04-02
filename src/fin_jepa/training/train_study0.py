@@ -766,11 +766,33 @@ def run_multiseed_benchmark(
         "stock_decline", "earnings_restate", "audit_qualification",
         "sec_enforcement", "bankruptcy",
     ])
-    batch_size = int(_cfg(config, "training.batch_size", 256))
-    epochs = int(_cfg(config, "training.epochs", 100))
     lr = float(_cfg(config, "training.learning_rate", 1e-4))
-    wd = float(_cfg(config, "training.weight_decay", 1e-5))
-    patience_val = int(_cfg(config, "training.patience", 10))
+
+    # Lazy import to avoid circular dependency (ablations imports from train_study0)
+    from fin_jepa.training.ablations import _BENCHMARK_DEFAULTS, _train_and_evaluate
+
+    # ATS-217: build model_kwargs identically to Cell 24 / _train_and_evaluate
+    # so the exact same code path produces identical seed-42 results.
+    model_kwargs = {
+        "n_features": len(feature_cols),
+        "d_token": int(_cfg(config, "ft_transformer.d_token", _BENCHMARK_DEFAULTS["d_token"])),
+        "n_heads": int(_cfg(config, "ft_transformer.n_heads", _BENCHMARK_DEFAULTS["n_heads"])),
+        "n_layers": int(_cfg(config, "ft_transformer.n_layers", _BENCHMARK_DEFAULTS["n_layers"])),
+        "d_ffn_factor": int(_cfg(config, "ft_transformer.d_ffn_factor", _BENCHMARK_DEFAULTS["d_ffn_factor"])),
+        "dropout": float(_cfg(config, "ft_transformer.dropout", _BENCHMARK_DEFAULTS["dropout"])),
+        "n_outputs": 1,
+        "n_cat_features": n_cat,
+        "cat_cardinalities": cat_cards,
+    }
+
+    # Load SSL checkpoint once (if provided)
+    ssl_ckpt = _cfg(config, "ssl_checkpoint", None)
+    init_state_dict = None
+    if ssl_ckpt is not None:
+        ckpt_path = Path(ssl_ckpt)
+        if ckpt_path.exists():
+            init_state_dict = torch.load(ckpt_path, map_location=device)
+            log.info("Loaded SSL checkpoint: %s", ckpt_path)
 
     # per_seed_auroc[outcome] = list of test AUROC values, one per seed
     per_seed_auroc: dict[str, list[float]] = {oc: [] for oc in outcomes}
@@ -780,71 +802,25 @@ def run_multiseed_benchmark(
 
         for outcome in outcomes:
             # ATS-217: reset seed before *each* outcome so the random state
-            # at model-init time matches Cell 24 (final_benchmark), which
-            # also calls seed_everything(SEED) per outcome.
+            # at model-init time matches Cell 24 (final_benchmark) and the
+            # SSL baseline in run_ssl_experiment.
             seed_everything(seed)
+
             if outcome not in splits["train"].columns:
                 continue
 
-            train_valid = splits["train"][splits["train"][outcome].notna()]
-            val_valid = splits["val"][splits["val"][outcome].notna()]
-            test_valid = splits["test"][splits["test"][outcome].notna()]
-
-            n_pos_train = int(train_valid[outcome].sum())
-            n_neg_train = len(train_valid) - n_pos_train
-            if n_pos_train < MIN_POSITIVES:
-                continue
-
-            pos_weight = n_neg_train / max(n_pos_train, 1)
-
-            train_loader = make_dataloader(
-                train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
-                cat_feature_cols=categorical_cols or None,
+            # Delegate to _train_and_evaluate — the exact same function
+            # used by run_ssl_experiment (which already matches Cell 24).
+            metrics = _train_and_evaluate(
+                splits, feature_cols, outcome, device, model_kwargs,
+                init_state_dict=init_state_dict,
+                cat_feature_cols=categorical_cols,
+                lr=lr,
             )
-            val_loader = make_dataloader(
-                val_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
-                cat_feature_cols=categorical_cols or None,
-            )
-            test_loader = make_dataloader(
-                test_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
-                cat_feature_cols=categorical_cols or None,
-            )
-
-            ft_model = FTTransformer(
-                n_features=len(feature_cols),
-                d_token=int(_cfg(config, "ft_transformer.d_token", 192)),
-                n_heads=int(_cfg(config, "ft_transformer.n_heads", 8)),
-                n_layers=int(_cfg(config, "ft_transformer.n_layers", 3)),
-                d_ffn_factor=int(_cfg(config, "ft_transformer.d_ffn_factor", 4)),
-                dropout=float(_cfg(config, "ft_transformer.dropout", 0.0)),
-                n_outputs=1,
-                n_cat_features=n_cat,
-                cat_cardinalities=cat_cards,
-            ).to(device)
-
-            # Load SSL pretrained weights if checkpoint path is provided
-            ssl_ckpt = _cfg(config, "ssl_checkpoint", None)
-            if ssl_ckpt is not None:
-                ckpt_path = Path(ssl_ckpt)
-                if ckpt_path.exists():
-                    ssl_state = torch.load(ckpt_path, map_location=device)
-                    ft_model.load_state_dict(ssl_state, strict=False)
-                    log.info("  Loaded SSL checkpoint: %s", ckpt_path)
-
-            optimizer = torch.optim.AdamW(ft_model.parameters(), lr=lr, weight_decay=wd)
-            criterion = nn.BCEWithLogitsLoss(
-                pos_weight=torch.tensor([pos_weight], device=device),
-            )
-            train_ft_transformer(
-                ft_model, train_loader, val_loader, criterion, optimizer,
-                device, epochs=epochs, patience=patience_val,
-            )
-            ft_y_true, ft_y_score = _predict_scores(ft_model, test_loader, device)
-            if len(np.unique(ft_y_true)) < 2:
-                continue
-            test_auroc = float(roc_auc_score(ft_y_true, ft_y_score))
-            per_seed_auroc[outcome].append(test_auroc)
-            log.info("  Seed %d | %s | test AUROC: %.4f", seed, outcome, test_auroc)
+            test_auroc = metrics.get("auroc")
+            if test_auroc is not None:
+                per_seed_auroc[outcome].append(float(test_auroc))
+                log.info("  Seed %d | %s | test AUROC: %.4f", seed, outcome, test_auroc)
 
     # ── Aggregate ────────────────────────────────────────────────────
     aggregated: dict[str, dict] = {}
