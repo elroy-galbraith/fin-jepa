@@ -407,6 +407,7 @@ class FeatureScaler:
                 self._qt = QuantileTransformer(
                     output_distribution="normal",
                     n_quantiles=n_quantiles,
+                    random_state=42,
                 )
                 self._qt.fit(work.values)
         elif self.method == "zscore":
