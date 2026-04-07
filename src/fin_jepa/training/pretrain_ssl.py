@@ -13,6 +13,7 @@ import json
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -500,6 +501,236 @@ def run_ssl_experiment(
     return output
 
 
+# ── Multi-seed SSL evaluation (ATS-252) ───────────────────────────────────
+
+
+def run_multiseed_ssl(
+    config,
+    seeds: list[int] | None = None,
+    *,
+    prebuilt_splits: dict | None = None,
+    prebuilt_feature_cols: list[str] | None = None,
+    prebuilt_cat_cols: list[str] | None = None,
+) -> dict:
+    """Run SSL pretraining + fine-tuning across multiple seeds.
+
+    For each seed, pretrain with each mask ratio (200 epochs), fine-tune
+    on all outcomes, and evaluate on test.  Reports mean +/- std AUROC
+    per (outcome, mask_ratio) to confirm which SSL gains survive
+    initialisation variance.
+
+    Parameters
+    ----------
+    config : dict or DictConfig
+        Hydra configuration (from ``configs/study0/ssl_experiment.yaml``).
+    seeds : list[int] or None
+        Override seeds list; falls back to ``ssl_experiment.seeds``,
+        then ``training.seeds``, then ``[42, 123, 456]``.
+    prebuilt_splits : dict or None
+        If provided, reuse caller's preprocessed train/val/test splits
+        (ATS-217 consistency pattern).
+    prebuilt_feature_cols : list[str] or None
+        Feature column names corresponding to *prebuilt_splits*.
+    prebuilt_cat_cols : list[str] or None
+        Categorical column names corresponding to *prebuilt_splits*.
+
+    Returns
+    -------
+    dict with keys ``multiseed_ssl`` (per-outcome per-ratio stats),
+    ``seeds``, and ``mask_ratios``.
+    """
+    from fin_jepa.data.labels import load_label_database
+    from fin_jepa.training.ablations import _BENCHMARK_DEFAULTS, _train_and_evaluate
+    from fin_jepa.training.train_study0 import _cfg
+
+    if seeds is None:
+        seeds = list(
+            _cfg(config, "ssl_experiment.seeds",
+                 _cfg(config, "training.seeds", [42, 123, 456]))
+        )
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    log.info("Multi-seed SSL | seeds=%s | device=%s", seeds, device)
+
+    # ── Load data ────────────────────────────────────────────────────
+    if prebuilt_splits is not None:
+        splits = prebuilt_splits
+        feature_cols = prebuilt_feature_cols or []
+        categorical_cols = prebuilt_cat_cols or []
+        log.info(
+            "Multi-seed SSL: using prebuilt splits (%d train rows).",
+            len(splits["train"]),
+        )
+    else:
+        raw_dir = Path(_cfg(config, "data.raw_dir", "data/raw"))
+        processed_dir = Path(_cfg(config, "data.processed_dir", "data/processed"))
+
+        xbrl_df = load_xbrl_features(raw_dir)
+        labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
+        xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
+        labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
+        merged = xbrl_df.merge(
+            labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"),
+        )
+
+        split_cfg = SplitConfig(
+            train_end=_cfg(config, "data.split.train_end", "2017-12-31"),
+            val_end=_cfg(config, "data.split.val_end", "2019-12-31"),
+            test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
+        )
+        feat_cfg = FeatureConfig(
+            use_raw=_cfg(config, "features.use_raw", True),
+            use_ratios=_cfg(config, "features.use_ratios", True),
+            use_yoy=_cfg(config, "features.use_yoy", True),
+            use_sic=_cfg(config, "features.use_sic", True),
+            use_missingness_flags=_cfg(config, "features.use_missingness_flags", True),
+            coverage_threshold=_cfg(config, "features.coverage_threshold", 0.50),
+            normalization_method=_cfg(config, "features.normalization_method", "quantile"),
+            median_impute=_cfg(config, "features.median_impute", True),
+        )
+
+        universe_df = None
+        universe_path = raw_dir / "company_universe.parquet"
+        if universe_path.exists() and feat_cfg.use_sic:
+            universe_df = pd.read_parquet(universe_path)
+
+        splits, _scaler, feature_cols, categorical_cols = build_feature_matrix(
+            merged, split_cfg, feat_cfg, universe_df=universe_df,
+        )
+
+    n_features = len(feature_cols)
+    n_cat = len(categorical_cols)
+    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
+
+    outcomes = _cfg(config, "outcomes", _DEFAULT_OUTCOMES)
+    mask_ratios = _cfg(config, "ssl_experiment.mask_ratios", [0.15, 0.30, 0.50])
+
+    model_kwargs = {
+        "n_features": n_features,
+        "d_token": int(_cfg(config, "ft_transformer.d_token", _BENCHMARK_DEFAULTS["d_token"])),
+        "n_heads": int(_cfg(config, "ft_transformer.n_heads", _BENCHMARK_DEFAULTS["n_heads"])),
+        "n_layers": int(_cfg(config, "ft_transformer.n_layers", _BENCHMARK_DEFAULTS["n_layers"])),
+        "d_ffn_factor": int(_cfg(config, "ft_transformer.d_ffn_factor", _BENCHMARK_DEFAULTS["d_ffn_factor"])),
+        "dropout": float(_cfg(config, "ft_transformer.dropout", _BENCHMARK_DEFAULTS["dropout"])),
+        "n_outputs": 1,
+        "n_cat_features": n_cat,
+        "cat_cardinalities": cat_cards,
+    }
+
+    pretrain_epochs = int(_cfg(config, "pretrain.epochs", 200))
+    pretrain_lr = float(_cfg(config, "pretrain.learning_rate", 1e-4))
+    pretrain_wd = float(_cfg(config, "pretrain.weight_decay", 1e-5))
+    pretrain_warmup = int(_cfg(config, "pretrain.warmup_epochs", 10))
+    pretrain_batch_size = int(_cfg(config, "pretrain.batch_size", 512))
+    finetune_lr = float(
+        _cfg(config, "training.learning_rate", _BENCHMARK_DEFAULTS["learning_rate"]),
+    )
+
+    # per_seed[outcome]["scratch"|ratio_key] = list of (seed, auroc) tuples
+    # Using tuples ensures seed labels stay aligned even when a seed is
+    # skipped (e.g. _train_and_evaluate returns auroc=None).
+    per_seed: dict[str, dict[str, list[tuple[int, float]]]] = {}
+    for outcome in outcomes:
+        per_seed[outcome] = {"scratch": []}
+        for ratio in mask_ratios:
+            per_seed[outcome][f"{ratio:.2f}"] = []
+
+    for seed in seeds:
+        log.info("═══ Seed %d ═══════════════════════════════════════════", seed)
+
+        # ── From-scratch baseline ───────────────────────────────────
+        for outcome in outcomes:
+            seed_everything(seed)
+            metrics = _train_and_evaluate(
+                splits, feature_cols, outcome, device, model_kwargs,
+                cat_feature_cols=categorical_cols,
+                lr=finetune_lr,
+            )
+            auroc = metrics.get("auroc")
+            if auroc is not None:
+                per_seed[outcome]["scratch"].append((seed, float(auroc)))
+                log.info("  scratch | seed=%d | %s | AUROC=%.4f", seed, outcome, auroc)
+
+        # ── Pretrained variants ─────────────────────────────────────
+        for ratio in mask_ratios:
+            ratio_key = f"{ratio:.2f}"
+            log.info("  Pretraining mask_ratio=%.2f seed=%d ...", ratio, seed)
+            seed_everything(seed)
+
+            ssl_loader = make_dataloader(
+                splits["train"], feature_cols, label_col=None,
+                batch_size=pretrain_batch_size, shuffle=True,
+                cat_feature_cols=categorical_cols or None,
+            )
+
+            encoder = FTTransformer(**model_kwargs)
+            state_dict, _losses = _pretrain_encoder(
+                encoder, ssl_loader,
+                mask_ratio=ratio,
+                device=device,
+                epochs=pretrain_epochs,
+                lr=pretrain_lr,
+                wd=pretrain_wd,
+                warmup_epochs=pretrain_warmup,
+            )
+
+            for outcome in outcomes:
+                seed_everything(seed)
+                metrics = _train_and_evaluate(
+                    splits, feature_cols, outcome, device, model_kwargs,
+                    init_state_dict=state_dict,
+                    cat_feature_cols=categorical_cols,
+                    lr=finetune_lr,
+                )
+                auroc = metrics.get("auroc")
+                if auroc is not None:
+                    per_seed[outcome][ratio_key].append((seed, float(auroc)))
+                    log.info(
+                        "  mr=%.2f | seed=%d | %s | AUROC=%.4f",
+                        ratio, seed, outcome, auroc,
+                    )
+
+            # Free GPU memory after each (seed, ratio) pretraining
+            del encoder, state_dict
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    # ── Aggregate ────────────────────────────────────────────────────
+    aggregated: dict[str, dict] = {}
+    for outcome in outcomes:
+        aggregated[outcome] = {}
+        for key, seed_auroc_pairs in per_seed[outcome].items():
+            if seed_auroc_pairs:
+                auroc_values = [a for _, a in seed_auroc_pairs]
+                aggregated[outcome][key] = {
+                    "mean_auroc": float(np.mean(auroc_values)),
+                    "std_auroc": float(np.std(auroc_values)),
+                    "per_seed": {str(s): a for s, a in seed_auroc_pairs},
+                }
+                log.info(
+                    "  %s | %s | mean=%.4f ± %.4f (n=%d)",
+                    outcome, key,
+                    aggregated[outcome][key]["mean_auroc"],
+                    aggregated[outcome][key]["std_auroc"],
+                    len(auroc_values),
+                )
+
+    output: dict = {
+        "multiseed_ssl": aggregated,
+        "seeds": list(seeds),
+        "mask_ratios": mask_ratios,
+    }
+
+    results_dir = Path(_cfg(config, "results_dir", "results/study0"))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    out_path = results_dir / "multiseed_ssl.json"
+    with open(out_path, "w") as f:
+        json.dump(output, f, indent=2, default=str)
+    log.info("Multi-seed SSL results saved to %s", out_path)
+
+    return output
+
+
 if __name__ == "__main__":
     import sys
 
@@ -507,9 +738,17 @@ if __name__ == "__main__":
 
     # Dispatch: use ssl_experiment config → run_ssl_experiment,
     #           otherwise default pretrain config → run_pretraining.
+    _use_multiseed_ssl = any("multiseed_ssl" in arg for arg in sys.argv)
     _use_ssl_experiment = any("ssl_experiment" in arg for arg in sys.argv)
-    _config_name = "ssl_experiment" if _use_ssl_experiment else "pretrain"
-    _entry_fn = run_ssl_experiment if _use_ssl_experiment else run_pretraining
+    if _use_multiseed_ssl:
+        _config_name = "ssl_experiment"
+        _entry_fn = run_multiseed_ssl
+    elif _use_ssl_experiment:
+        _config_name = "ssl_experiment"
+        _entry_fn = run_ssl_experiment
+    else:
+        _config_name = "pretrain"
+        _entry_fn = run_pretraining
 
     try:
         import hydra
