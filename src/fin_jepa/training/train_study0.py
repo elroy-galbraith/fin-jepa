@@ -424,7 +424,8 @@ def tune_ft_transformer(
 
             # Free GPU memory
             del model, optimizer, criterion
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         return float(np.mean(aurocs)) if aurocs else 0.0
 

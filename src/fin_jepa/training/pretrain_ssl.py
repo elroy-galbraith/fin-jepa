@@ -692,7 +692,8 @@ def run_multiseed_ssl(
 
             # Free GPU memory after each (seed, ratio) pretraining
             del encoder, state_dict
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     # ── Aggregate ────────────────────────────────────────────────────
     aggregated: dict[str, dict] = {}
@@ -711,7 +712,7 @@ def run_multiseed_ssl(
                     outcome, key,
                     aggregated[outcome][key]["mean_auroc"],
                     aggregated[outcome][key]["std_auroc"],
-                    len(aurocs),
+                    len(auroc_values),
                 )
 
     output: dict = {
