@@ -626,8 +626,10 @@ def run_multiseed_ssl(
         _cfg(config, "training.learning_rate", _BENCHMARK_DEFAULTS["learning_rate"]),
     )
 
-    # per_seed[outcome]["scratch"|ratio_key] = list of AUROC per seed
-    per_seed: dict[str, dict[str, list[float]]] = {}
+    # per_seed[outcome]["scratch"|ratio_key] = list of (seed, auroc) tuples
+    # Using tuples ensures seed labels stay aligned even when a seed is
+    # skipped (e.g. _train_and_evaluate returns auroc=None).
+    per_seed: dict[str, dict[str, list[tuple[int, float]]]] = {}
     for outcome in outcomes:
         per_seed[outcome] = {"scratch": []}
         for ratio in mask_ratios:
@@ -646,7 +648,7 @@ def run_multiseed_ssl(
             )
             auroc = metrics.get("auroc")
             if auroc is not None:
-                per_seed[outcome]["scratch"].append(float(auroc))
+                per_seed[outcome]["scratch"].append((seed, float(auroc)))
                 log.info("  scratch | seed=%d | %s | AUROC=%.4f", seed, outcome, auroc)
 
         # ── Pretrained variants ─────────────────────────────────────
@@ -682,7 +684,7 @@ def run_multiseed_ssl(
                 )
                 auroc = metrics.get("auroc")
                 if auroc is not None:
-                    per_seed[outcome][ratio_key].append(float(auroc))
+                    per_seed[outcome][ratio_key].append((seed, float(auroc)))
                     log.info(
                         "  mr=%.2f | seed=%d | %s | AUROC=%.4f",
                         ratio, seed, outcome, auroc,
@@ -696,12 +698,13 @@ def run_multiseed_ssl(
     aggregated: dict[str, dict] = {}
     for outcome in outcomes:
         aggregated[outcome] = {}
-        for key, aurocs in per_seed[outcome].items():
-            if aurocs:
+        for key, seed_auroc_pairs in per_seed[outcome].items():
+            if seed_auroc_pairs:
+                auroc_values = [a for _, a in seed_auroc_pairs]
                 aggregated[outcome][key] = {
-                    "mean_auroc": float(np.mean(aurocs)),
-                    "std_auroc": float(np.std(aurocs)),
-                    "per_seed": {str(s): a for s, a in zip(seeds, aurocs)},
+                    "mean_auroc": float(np.mean(auroc_values)),
+                    "std_auroc": float(np.std(auroc_values)),
+                    "per_seed": {str(s): a for s, a in seed_auroc_pairs},
                 }
                 log.info(
                     "  %s | %s | mean=%.4f ± %.4f (n=%d)",

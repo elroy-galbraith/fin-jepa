@@ -1177,12 +1177,21 @@ def run_walk_forward(
         try:
             with open(ckpt_path) as f:
                 ckpt_data = json.load(f)
-            for entry in ckpt_data.get("completed", []):
-                completed_folds[entry["fold"]] = entry
-            log.info(
-                "Resuming walk-forward from checkpoint: %d folds already done",
-                len(completed_folds),
-            )
+            # Validate that checkpoint was produced with the same tuned params
+            # to prevent silently mixing results from different configs.
+            ckpt_xgb = ckpt_data.get("tuned_xgb_params")
+            ckpt_ft = ckpt_data.get("tuned_ft_params")
+            if ckpt_xgb != tuned_xgb_params or ckpt_ft != tuned_ft_params:
+                log.warning(
+                    "Checkpoint tuned params differ from current — starting fresh"
+                )
+            else:
+                for entry in ckpt_data.get("completed", []):
+                    completed_folds[entry["fold"]] = entry
+                log.info(
+                    "Resuming walk-forward from checkpoint: %d folds already done",
+                    len(completed_folds),
+                )
         except (json.JSONDecodeError, KeyError):
             log.warning("Corrupt checkpoint — starting fresh")
 
@@ -1298,7 +1307,9 @@ def run_walk_forward(
         fold_results.append(fold_entry)
 
         # Checkpoint after each fold (atomic write)
-        _save_walk_forward_checkpoint(ckpt_path, fold_results)
+        _save_walk_forward_checkpoint(
+            ckpt_path, fold_results, tuned_xgb_params, tuned_ft_params,
+        )
 
     output: dict = {
         "walk_forward_folds": fold_results,
@@ -1319,11 +1330,23 @@ def run_walk_forward(
     return output
 
 
-def _save_walk_forward_checkpoint(path: Path, completed: list[dict]) -> None:
-    """Atomically save walk-forward checkpoint."""
+def _save_walk_forward_checkpoint(
+    path: Path,
+    completed: list[dict],
+    tuned_xgb_params: dict | None = None,
+    tuned_ft_params: dict | None = None,
+) -> None:
+    """Atomically save walk-forward checkpoint with provenance."""
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w") as f:
-        json.dump({"completed": completed}, f, indent=2, default=str)
+        json.dump(
+            {
+                "completed": completed,
+                "tuned_xgb_params": tuned_xgb_params,
+                "tuned_ft_params": tuned_ft_params,
+            },
+            f, indent=2, default=str,
+        )
     tmp.replace(path)
 
 
