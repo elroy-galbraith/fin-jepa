@@ -278,6 +278,179 @@ def tune_baseline(
     }
 
 
+# ── Optuna-based FT-Transformer tuning ────────────────────────────────────
+
+
+def tune_ft_transformer(
+    X_train_df: pd.DataFrame,
+    y_train: np.ndarray,
+    feature_cols: list[str],
+    device: torch.device,
+    search_space: dict,
+    n_splits: int = 3,
+    n_trials: int = 30,
+    seed: int = 42,
+    n_cat: int = 0,
+    cat_cards: list[int] | None = None,
+    categorical_cols: list[str] | None = None,
+    fixed_params: dict | None = None,
+) -> dict:
+    """Tune FT-Transformer hyperparameters using temporal CV and Optuna.
+
+    Mirrors :func:`tune_baseline` but uses the PyTorch training loop
+    (``train_ft_transformer``) instead of sklearn ``.fit()``.
+
+    Parameters
+    ----------
+    X_train_df : DataFrame
+        Training data with ``fiscal_year`` column for temporal splitting
+        and the feature columns.  Must also contain columns in
+        *categorical_cols* when categorical features are used.
+    y_train : ndarray
+        Binary labels aligned with *X_train_df*.
+    feature_cols : list[str]
+        Continuous feature columns in *X_train_df*.
+    device : torch.device
+        GPU or CPU device for model training.
+    search_space : dict
+        Maps parameter names to dicts with keys ``type``
+        (``"float"``, ``"int"``, or ``"categorical"``), ``low``/``high``
+        (or ``choices``), and optionally ``log``.
+    n_splits : int
+        Number of temporal CV folds.
+    n_trials : int
+        Number of Optuna trials.
+    seed : int
+        Random seed for the Optuna sampler.
+    n_cat : int
+        Number of categorical features.
+    cat_cards : list[int] or None
+        Cardinalities for categorical embedding layers.
+    categorical_cols : list[str] or None
+        Categorical column names in *X_train_df*.
+    fixed_params : dict or None
+        Fixed FT-Transformer params not subject to search
+        (defaults: ``n_heads=8, d_ffn_factor=4, dropout=0.0``).
+
+    Returns
+    -------
+    dict with ``best_params``, ``mean_val_auroc``, and ``all_trials``.
+    """
+    import optuna
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    if fixed_params is None:
+        fixed_params = {"n_heads": 8, "d_ffn_factor": 4, "dropout": 0.0}
+
+    cv = TemporalCV(n_splits=n_splits)
+
+    # Reduced training budget per fold during tuning (faster iteration).
+    tune_epochs = 50
+    tune_patience = 5
+
+    def objective(trial: optuna.Trial) -> float:
+        params: dict = {}
+        for name, spec in search_space.items():
+            if spec["type"] == "float":
+                params[name] = trial.suggest_float(
+                    name, spec["low"], spec["high"], log=spec.get("log", False),
+                )
+            elif spec["type"] == "int":
+                params[name] = trial.suggest_int(name, spec["low"], spec["high"])
+            elif spec["type"] == "categorical":
+                params[name] = trial.suggest_categorical(name, spec["choices"])
+
+        # Build model kwargs: sampled params + fixed params
+        model_kwargs = {
+            "n_features": len(feature_cols),
+            "d_token": int(params.get("d_token", fixed_params.get("d_token", 192))),
+            "n_heads": int(fixed_params.get("n_heads", 8)),
+            "n_layers": int(params.get("n_layers", fixed_params.get("n_layers", 3))),
+            "d_ffn_factor": int(fixed_params.get("d_ffn_factor", 4)),
+            "dropout": float(fixed_params.get("dropout", 0.0)),
+            "n_outputs": 1,
+            "n_cat_features": n_cat,
+            "cat_cardinalities": cat_cards,
+        }
+
+        lr = float(params.get("learning_rate", 1e-4))
+
+        aurocs: list[float] = []
+        for train_idx, val_idx in cv.split(X_train_df):
+            train_fold_df = X_train_df.iloc[train_idx]
+            val_fold_df = X_train_df.iloc[val_idx]
+            y_tr = y_train[train_idx]
+            y_va = y_train[val_idx]
+
+            if len(np.unique(y_va)) < 2:
+                continue
+
+            n_pos = int(y_tr.sum())
+            n_neg = len(y_tr) - n_pos
+            if n_pos < MIN_POSITIVES:
+                continue
+            pos_weight = n_neg / max(n_pos, 1)
+
+            # Build temporary DataFrames with a label column for make_dataloader
+            _LABEL = "__tune_label__"
+            tr_df = train_fold_df.copy()
+            tr_df[_LABEL] = y_tr
+            va_df = val_fold_df.copy()
+            va_df[_LABEL] = y_va
+
+            _cat_cols = categorical_cols or None
+            train_loader = make_dataloader(
+                tr_df, feature_cols, _LABEL, batch_size=256, shuffle=True,
+                cat_feature_cols=_cat_cols,
+            )
+            val_loader = make_dataloader(
+                va_df, feature_cols, _LABEL, batch_size=256, shuffle=False,
+                cat_feature_cols=_cat_cols,
+            )
+
+            seed_everything(seed)
+            model = FTTransformer(**model_kwargs).to(device)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+            criterion = nn.BCEWithLogitsLoss(
+                pos_weight=torch.tensor([pos_weight], device=device),
+            )
+
+            result = train_ft_transformer(
+                model, train_loader, val_loader, criterion, optimizer,
+                device, epochs=tune_epochs, patience=tune_patience,
+            )
+            aurocs.append(result["best_val_auroc"])
+
+            # Free GPU memory
+            del model, optimizer, criterion
+            torch.cuda.empty_cache()
+
+        return float(np.mean(aurocs)) if aurocs else 0.0
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=seed),
+    )
+    study.optimize(objective, n_trials=n_trials)
+
+    all_trials = [
+        {"number": t.number, "params": t.params, "value": t.value}
+        for t in study.trials
+    ]
+
+    log.info(
+        "  FT-Transformer tuning — best val AUROC: %.4f  params: %s",
+        study.best_value, study.best_params,
+    )
+
+    return {
+        "best_params": study.best_params,
+        "mean_val_auroc": study.best_value,
+        "all_trials": all_trials,
+    }
+
+
 # ── Main benchmark entry point ───────────────────────────────────────────
 
 
@@ -856,7 +1029,12 @@ def run_multiseed_benchmark(
 # ── Walk-forward (expanding-window) validation ───────────────────────────
 
 
-def run_walk_forward(config) -> dict:
+def run_walk_forward(
+    config,
+    *,
+    tuned_xgb_params: dict | None = None,
+    tuned_ft_params: dict | None = None,
+) -> dict:
     """Evaluate XGBoost and FT-Transformer across expanding-window folds.
 
     Uses ``rolling_split`` section from benchmark.yaml to generate folds from
@@ -867,10 +1045,22 @@ def run_walk_forward(config) -> dict:
     Feature normalisation is fit once on data up to ``first_train_end`` so
     that future data never contaminates the scaler (conservative choice).
 
+    Parameters
+    ----------
+    config : dict or DictConfig
+    tuned_xgb_params : dict or None
+        Optuna-tuned XGBoost params (e.g. from ``tune_baseline``).
+        Overrides config defaults for ``n_estimators``, ``learning_rate``,
+        ``max_depth``, ``subsample``, ``colsample_bytree``.
+    tuned_ft_params : dict or None
+        Optuna-tuned FT-Transformer params (e.g. from ``tune_ft_transformer``).
+        Overrides config defaults for ``d_token``, ``n_layers``, and
+        optimizer ``learning_rate``.
+
     Returns
     -------
-    dict with ``walk_forward_folds`` (list of per-fold per-outcome results)
-    and ``n_folds``.
+    dict with ``walk_forward_folds`` (list of per-fold per-outcome results),
+    ``n_folds``, and provenance fields.
     """
     seed = int(_cfg(config, "training.seed", 42))
     seed_everything(seed)
@@ -943,13 +1133,68 @@ def run_walk_forward(config) -> dict:
     ])
     batch_size = int(_cfg(config, "training.batch_size", 256))
     epochs = int(_cfg(config, "training.epochs", 100))
-    lr_rate = float(_cfg(config, "training.learning_rate", 1e-4))
     wd = float(_cfg(config, "training.weight_decay", 1e-5))
     patience_val = int(_cfg(config, "training.patience", 10))
+
+    # ── Resolve XGBoost params (config defaults, overridden by tuned) ─
+    xgb_defaults = {
+        "n_estimators": int(_cfg(config, "xgboost.n_estimators", 500)),
+        "learning_rate": float(_cfg(config, "xgboost.learning_rate", 0.05)),
+        "max_depth": int(_cfg(config, "xgboost.max_depth", 6)),
+        "subsample": float(_cfg(config, "xgboost.subsample", 0.8)),
+        "colsample_bytree": float(_cfg(config, "xgboost.colsample_bytree", 0.8)),
+    }
+    if tuned_xgb_params:
+        xgb_defaults.update(tuned_xgb_params)
+    xgb_params = xgb_defaults
+    log.info("Walk-forward XGBoost params: %s", xgb_params)
+
+    # ── Resolve FT-Transformer params (config defaults, overridden by tuned) ─
+    ft_d_token = int(
+        (tuned_ft_params or {}).get(
+            "d_token", _cfg(config, "ft_transformer.d_token", 192)),
+    )
+    ft_n_layers = int(
+        (tuned_ft_params or {}).get(
+            "n_layers", _cfg(config, "ft_transformer.n_layers", 3)),
+    )
+    ft_lr = float(
+        (tuned_ft_params or {}).get(
+            "learning_rate", _cfg(config, "training.learning_rate", 1e-4)),
+    )
+    log.info(
+        "Walk-forward FT params: d_token=%d n_layers=%d lr=%.2e",
+        ft_d_token, ft_n_layers, ft_lr,
+    )
+
+    # ── Checkpoint / resume ──────────────────────────────────────────
+    results_dir = Path(_cfg(config, "results_dir", "results/study0"))
+    results_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = results_dir / "walk_forward_checkpoint.json"
+
+    completed_folds: dict[int, dict] = {}
+    if ckpt_path.exists():
+        try:
+            with open(ckpt_path) as f:
+                ckpt_data = json.load(f)
+            for entry in ckpt_data.get("completed", []):
+                completed_folds[entry["fold"]] = entry
+            log.info(
+                "Resuming walk-forward from checkpoint: %d folds already done",
+                len(completed_folds),
+            )
+        except (json.JSONDecodeError, KeyError):
+            log.warning("Corrupt checkpoint — starting fresh")
 
     fold_results: list[dict] = []
 
     for fold_idx, fold in enumerate(rolling_folds):
+        # Resume: skip already-completed folds
+        if fold_idx in completed_folds:
+            fold_results.append(completed_folds[fold_idx])
+            log.info("Fold %d: restored from checkpoint", fold_idx)
+            continue
+
         train_fold = fold["train"]
         val_fold = fold["val"]
         test_fold = fold["test"]
@@ -990,11 +1235,7 @@ def run_walk_forward(config) -> dict:
             y_test = test_valid[outcome].to_numpy(dtype=np.float32)
 
             xgb_model = build_xgboost(
-                n_estimators=int(_cfg(config, "xgboost.n_estimators", 500)),
-                learning_rate=float(_cfg(config, "xgboost.learning_rate", 0.05)),
-                max_depth=int(_cfg(config, "xgboost.max_depth", 6)),
-                subsample=float(_cfg(config, "xgboost.subsample", 0.8)),
-                colsample_bytree=float(_cfg(config, "xgboost.colsample_bytree", 0.8)),
+                **xgb_params,
                 scale_pos_weight=pos_weight,
             )
             xgb_model.fit(X_train, y_train)
@@ -1018,9 +1259,9 @@ def run_walk_forward(config) -> dict:
 
             ft_model = FTTransformer(
                 n_features=len(feature_cols),
-                d_token=int(_cfg(config, "ft_transformer.d_token", 192)),
+                d_token=ft_d_token,
                 n_heads=int(_cfg(config, "ft_transformer.n_heads", 8)),
-                n_layers=int(_cfg(config, "ft_transformer.n_layers", 3)),
+                n_layers=ft_n_layers,
                 d_ffn_factor=int(_cfg(config, "ft_transformer.d_ffn_factor", 4)),
                 dropout=float(_cfg(config, "ft_transformer.dropout", 0.0)),
                 n_outputs=1,
@@ -1028,7 +1269,7 @@ def run_walk_forward(config) -> dict:
                 cat_cardinalities=cat_cards,
             ).to(device)
 
-            optimizer = torch.optim.AdamW(ft_model.parameters(), lr=lr_rate, weight_decay=wd)
+            optimizer = torch.optim.AdamW(ft_model.parameters(), lr=ft_lr, weight_decay=wd)
             criterion = nn.BCEWithLogitsLoss(
                 pos_weight=torch.tensor([pos_weight], device=device),
             )
@@ -1049,22 +1290,41 @@ def run_walk_forward(config) -> dict:
             }
             log.info("  %s | XGB=%.4f FT=%.4f", outcome, xgb_auroc, ft_auroc)
 
-        fold_results.append({
+        fold_entry = {
             "fold": fold_idx,
             "label": fold_label,
             "outcomes": fold_outcome_results,
-        })
+        }
+        fold_results.append(fold_entry)
 
-    output: dict = {"walk_forward_folds": fold_results, "n_folds": len(fold_results)}
+        # Checkpoint after each fold (atomic write)
+        _save_walk_forward_checkpoint(ckpt_path, fold_results)
 
-    results_dir = Path(_cfg(config, "results_dir", "results/study0"))
-    results_dir.mkdir(parents=True, exist_ok=True)
+    output: dict = {
+        "walk_forward_folds": fold_results,
+        "n_folds": len(fold_results),
+        "tuned_xgb_params": tuned_xgb_params,
+        "tuned_ft_params": tuned_ft_params,
+    }
+
     out_path = results_dir / "walk_forward_results.json"
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2, default=str)
     log.info("Walk-forward results saved to %s", out_path)
 
+    # Clean up checkpoint now that we have the final result
+    if ckpt_path.exists():
+        ckpt_path.unlink()
+
     return output
+
+
+def _save_walk_forward_checkpoint(path: Path, completed: list[dict]) -> None:
+    """Atomically save walk-forward checkpoint."""
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump({"completed": completed}, f, indent=2, default=str)
+    tmp.replace(path)
 
 
 # ── Config access helper ─────────────────────────────────────────────────

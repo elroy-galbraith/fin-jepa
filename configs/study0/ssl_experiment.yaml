@@ -31,6 +31,7 @@ outcomes:
 
 ssl_experiment:
   mask_ratios: [0.15, 0.30, 0.50]
+  seeds: [42, 123, 456]
 
 pretrain:
   batch_size: 512
@@ -48,6 +49,7 @@ ft_transformer:
 
 training:
   seed: 42
+  seeds: [42, 123, 456]
 
 checkpoint_dir: models/checkpoints/study0_ssl_experiment
 results_dir: results/study0
