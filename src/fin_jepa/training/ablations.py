@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 
@@ -79,6 +80,8 @@ def run_ablations(config) -> dict:
 
     xbrl_df = load_xbrl_features(raw_dir)
     labels_df, _ = load_label_database(processed_dir / "label_database.parquet")
+    xbrl_df["period_end"] = pd.to_datetime(xbrl_df["period_end"])
+    labels_df["period_end"] = pd.to_datetime(labels_df["period_end"])
     merged = xbrl_df.merge(labels_df, on=["cik", "period_end"], how="inner", suffixes=("", "_label"))
 
     split_cfg = SplitConfig(
@@ -87,7 +90,6 @@ def run_ablations(config) -> dict:
         test_end=_cfg(config, "data.split.test_end", "2023-12-31"),
     )
     # Load universe for SIC join
-    import pandas as pd
     universe_df = None
     universe_path = raw_dir / "company_universe.parquet"
     if universe_path.exists():
