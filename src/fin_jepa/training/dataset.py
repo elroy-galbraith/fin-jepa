@@ -55,6 +55,7 @@ def make_dataloader(
     batch_size: int = 256,
     shuffle: bool = True,
     cat_feature_cols: list[str] | None = None,
+    seed: int | None = None,
 ) -> DataLoader:
     """Build a DataLoader from a DataFrame, filtering NaN labels.
 
@@ -76,6 +77,10 @@ def make_dataloader(
         extracted as int64 arrays and passed separately to the model via
         ``nn.Embedding``.  Pass ``None`` or ``[]`` when there are no
         categorical features.
+    seed:
+        When provided and *shuffle* is True, creates a pinned
+        ``torch.Generator`` so that shuffle order is deterministic
+        regardless of global RNG state.
 
     Returns
     -------
@@ -97,4 +102,8 @@ def make_dataloader(
         cat_features = work[cat_feature_cols].to_numpy(dtype=np.int64)
 
     ds = TabularDataset(features, labels, cat_features)
-    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
+    generator = None
+    if shuffle and seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, generator=generator)
