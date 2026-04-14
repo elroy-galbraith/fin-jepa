@@ -178,6 +178,7 @@ def run_pretraining(config) -> Path:
         batch_size=int(_cfg(config, "training.batch_size", 512)),
         shuffle=True,
         cat_feature_cols=categorical_cols or None,
+        seed=seed,
     )
 
     n_features = len(feature_cols)
@@ -367,6 +368,7 @@ def run_ssl_experiment(
             splits, feature_cols, outcome, device, model_kwargs,
             cat_feature_cols=categorical_cols,
             lr=finetune_lr,
+            seed=seed,
         )
         baseline_results[outcome] = metrics
 
@@ -399,6 +401,7 @@ def run_ssl_experiment(
                 splits["train"], feature_cols, label_col=None,
                 batch_size=pretrain_batch_size, shuffle=True,
                 cat_feature_cols=categorical_cols or None,
+                seed=seed,
             )
 
             encoder = FTTransformer(**model_kwargs)
@@ -424,6 +427,7 @@ def run_ssl_experiment(
                 init_state_dict=state_dict,
                 cat_feature_cols=categorical_cols,
                 lr=finetune_lr,
+                seed=seed,
             )
             pretrained_results[ratio_key][outcome] = metrics
 
@@ -466,12 +470,19 @@ def run_ssl_experiment(
     log.info("SSL experiment recommendation: %s (%d/5 outcomes improved)", recommendation, n_improved)
 
     # ── Save results ─────────────────────────────────────────────────
+    import hashlib as _hl
+
+    _fp_dict = {k: model_kwargs[k] for k in ("d_token", "n_heads", "n_layers")}
+    _fp_dict["lr"] = finetune_lr
+    _fp = _hl.sha256(json.dumps(_fp_dict, sort_keys=True).encode()).hexdigest()[:16]
+
     output = {
         "baseline": baseline_results,
         "pretrained": pretrained_results,
         "loss_curves": loss_curves,
         "comparison": comparison,
         "recommendation": recommendation,
+        "_meta": {"config_fingerprint": _fp},
     }
 
     results_dir = Path(_cfg(config, "results_dir", "results/study0"))
@@ -645,6 +656,7 @@ def run_multiseed_ssl(
                 splits, feature_cols, outcome, device, model_kwargs,
                 cat_feature_cols=categorical_cols,
                 lr=finetune_lr,
+                seed=seed,
             )
             auroc = metrics.get("auroc")
             if auroc is not None:
@@ -661,6 +673,7 @@ def run_multiseed_ssl(
                 splits["train"], feature_cols, label_col=None,
                 batch_size=pretrain_batch_size, shuffle=True,
                 cat_feature_cols=categorical_cols or None,
+                seed=seed,
             )
 
             encoder = FTTransformer(**model_kwargs)
@@ -681,6 +694,7 @@ def run_multiseed_ssl(
                     init_state_dict=state_dict,
                     cat_feature_cols=categorical_cols,
                     lr=finetune_lr,
+                    seed=seed,
                 )
                 auroc = metrics.get("auroc")
                 if auroc is not None:

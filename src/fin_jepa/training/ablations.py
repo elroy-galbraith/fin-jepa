@@ -226,6 +226,7 @@ def _run_architecture_sweep(
         metrics = _train_and_evaluate(
             splits, feature_cols, outcome, device, model_kwargs,
             cat_feature_cols=cat_feature_cols,
+            seed=seed,
         )
         results.append({param_name: value, **metrics})
 
@@ -268,6 +269,7 @@ def _run_fraction_sweep(
         metrics = _train_and_evaluate(
             sub_splits, feature_cols, outcome, device, model_kwargs,
             cat_feature_cols=cat_feature_cols,
+            seed=seed,
         )
         results.append({"train_fraction": frac, "n_train": n_sample, **metrics})
 
@@ -283,6 +285,7 @@ def _train_and_evaluate(
     init_state_dict: dict | None = None,
     cat_feature_cols: list[str] | None = None,
     lr: float | None = None,
+    seed: int | None = None,
 ) -> dict:
     """Train an FT-Transformer and return test metrics.
 
@@ -297,6 +300,9 @@ def _train_and_evaluate(
     lr:
         Learning rate override.  Falls back to
         ``_BENCHMARK_DEFAULTS["learning_rate"]`` when *None*.
+    seed:
+        Passed to ``make_dataloader`` so the train shuffle order is
+        deterministic via a pinned ``torch.Generator``.
     """
     train_df = splits["train"][splits["train"][outcome].notna()]
     val_df = splits["val"][splits["val"][outcome].notna()]
@@ -312,7 +318,7 @@ def _train_and_evaluate(
 
     batch_size = _BENCHMARK_DEFAULTS["batch_size"]
     _cat_cols = cat_feature_cols or None
-    train_loader = make_dataloader(train_df, feature_cols, outcome, batch_size, shuffle=True, cat_feature_cols=_cat_cols)
+    train_loader = make_dataloader(train_df, feature_cols, outcome, batch_size, shuffle=True, cat_feature_cols=_cat_cols, seed=seed)
     val_loader = make_dataloader(val_df, feature_cols, outcome, batch_size, shuffle=False, cat_feature_cols=_cat_cols)
     test_loader = make_dataloader(test_df, feature_cols, outcome, batch_size, shuffle=False, cat_feature_cols=_cat_cols)
 
@@ -385,7 +391,7 @@ def _run_mask_ratio_sweep(
         ssl_loader = make_dataloader(
             splits["train"], feature_cols, label_col=None,
             batch_size=_BENCHMARK_DEFAULTS["batch_size"], shuffle=True,
-            cat_feature_cols=_cat_cols,
+            cat_feature_cols=_cat_cols, seed=seed,
         )
 
         for _epoch in range(pretrain_epochs):
@@ -409,6 +415,7 @@ def _run_mask_ratio_sweep(
             splits, feature_cols, outcome, device, model_kwargs,
             init_state_dict=pretrained_state,
             cat_feature_cols=cat_feature_cols,
+            seed=seed,
         )
         metrics["mask_ratio"] = ratio
         results.append(metrics)
