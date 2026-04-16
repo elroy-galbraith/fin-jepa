@@ -24,6 +24,22 @@ ENV/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb_metadata/
+*-checkpoint.ipynb
+*.nbconvert.ipynb
+.virtual_documents/
+.jupyter/
+
+# Notebook run artifacts (ML frameworks / experiment trackers)
+lightning_logs/
+tb_logs/
+tensorboard/
+runs/
+wandb/
+.neptune/
+multirun/
+.hydra/
+# Colab defaults
+sample_data/
 
 # Data — raw and processed data are not committed
 data/raw/
