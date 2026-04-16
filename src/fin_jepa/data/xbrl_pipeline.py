@@ -88,6 +88,11 @@ class XBRLConfig:
             "EDGAR_USER_AGENT", "fin-jepa-research research@example.com"
         )
     )
+    #: Also write ``xbrl_amendment_registry.parquet`` alongside the features
+    #: file.  The registry has one row per distinct (cik, fiscal_year,
+    #: filed_date) tuple and is consumed by the reconciled earnings_restate
+    #: label builder.
+    write_amendment_registry: bool = True
 
     def __post_init__(self) -> None:
         if self.rate_limit_per_sec <= 0:
@@ -397,6 +402,128 @@ def extract_annual_facts(
 
 
 # ---------------------------------------------------------------------------
+# Amendment registry (retains full filing history per fiscal year)
+# ---------------------------------------------------------------------------
+
+_REGISTRY_PROBE_TAGS = (
+    "Assets", "Revenues", "NetIncomeLoss", "Liabilities",
+    "StockholdersEquity", "AssetsCurrent",
+)
+
+
+def extract_amendment_registry(
+    facts_json: dict[str, Any],
+    cik: str,
+    config: XBRLConfig | None = None,
+) -> pd.DataFrame:
+    """Build a registry of every distinct 10-K filing (including amendments).
+
+    Unlike :func:`extract_annual_facts`, this does **not** collapse to the
+    latest filing — it returns one row per ``(cik, fiscal_year, filed_date)``
+    tuple so downstream code can detect amendments as rows where the same
+    ``(cik, fiscal_year)`` has >1 filing.
+
+    Both ``form == "10-K"`` and ``form == "10-K/A"`` are included: the
+    Company Facts API sometimes reports re-filings under the base form code
+    with only ``filed`` changing, and we need those to count as amendments
+    too.
+
+    Args:
+        facts_json: Parsed Company Facts JSON.
+        cik: CIK string for the company.
+        config: Optional config to constrain the year range.
+
+    Returns:
+        DataFrame with columns: ``cik, fiscal_year, period_end,
+        filed_date, form``.  Empty if no us-gaap annual filings are found.
+    """
+    if not facts_json:
+        return pd.DataFrame()
+
+    us_gaap = facts_json.get("facts", {}).get("us-gaap", {})
+    if not us_gaap:
+        return pd.DataFrame()
+
+    start_year = config.start_year if config else 2012
+    end_year = config.end_year if config else 2024
+    cik_padded = cik.zfill(10)
+
+    # Collect one representative entry per (fy, filed) from the probe tags.
+    # Each probe tag is scanned, but a given (fy, filed) is only recorded
+    # once — we keep the first probe's period_end for consistency.
+    seen: dict[tuple[int, str], dict[str, Any]] = {}
+    for probe_tag in _REGISTRY_PROBE_TAGS:
+        concept = us_gaap.get(probe_tag)
+        if concept is None:
+            continue
+        for entry in concept.get("units", {}).get("USD", []):
+            if entry.get("fp") != "FY":
+                continue
+            form = entry.get("form")
+            if form not in ("10-K", "10-K/A"):
+                continue
+            fy = entry.get("fy")
+            if not isinstance(fy, int) or not (start_year <= fy <= end_year):
+                continue
+            filed = entry.get("filed")
+            if not filed:
+                continue
+            key = (fy, filed)
+            if key in seen:
+                continue
+            seen[key] = {
+                "cik": cik_padded,
+                "fiscal_year": fy,
+                "period_end": entry.get("end"),
+                "filed_date": filed,
+                "form": form,
+            }
+
+    if not seen:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(list(seen.values()))
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce").dt.date
+    df["filed_date"] = pd.to_datetime(df["filed_date"], errors="coerce").dt.date
+    return df.sort_values(["fiscal_year", "filed_date"]).reset_index(drop=True)
+
+
+def build_amendment_registry(
+    ciks: list[str],
+    cache_dir: Path,
+    config: XBRLConfig,
+) -> pd.DataFrame:
+    """Build the amendment registry across all companies from the cache.
+
+    Reads each ``cache_dir/companyfacts/{cik}.json`` (populated by
+    :func:`fetch_all_company_facts`) and concatenates per-company registries.
+    No network calls.
+    """
+    frames: list[pd.DataFrame] = []
+    for cik in ciks:
+        cik_padded = cik.zfill(10)
+        cache_path = cache_dir / "companyfacts" / f"{cik_padded}.json"
+        if not cache_path.exists():
+            continue
+        try:
+            with open(cache_path, encoding="utf-8") as fh:
+                facts = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug("Could not read cached facts for CIK %s: %s", cik_padded, exc)
+            continue
+        df = extract_amendment_registry(facts, cik_padded, config)
+        if not df.empty:
+            frames.append(df)
+
+    if not frames:
+        return pd.DataFrame(
+            columns=["cik", "fiscal_year", "period_end", "filed_date", "form"]
+        )
+
+    return pd.concat(frames, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
 # Batch fetcher with rate limiting
 # ---------------------------------------------------------------------------
 
@@ -592,6 +719,20 @@ def build_xbrl_dataset(
         "XBRL dataset written to %s  (%d observations, %d companies)",
         output_path, len(df), df["cik"].nunique(),
     )
+
+    if config.write_amendment_registry:
+        registry = build_amendment_registry(ciks, cache_dir, config)
+        registry_path = output_path.parent / "xbrl_amendment_registry.parquet"
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry.to_parquet(registry_path, index=False)
+        n_amendments = int(
+            registry.groupby(["cik", "fiscal_year"]).size().gt(1).sum()
+        ) if not registry.empty else 0
+        logger.info(
+            "XBRL amendment registry written to %s  (%d rows, %d amended filings)",
+            registry_path, len(registry), n_amendments,
+        )
+
     return df
 
 
