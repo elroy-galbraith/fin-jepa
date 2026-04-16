@@ -31,12 +31,12 @@ Also tests whether masked-feature self-supervised pretraining helps.
 - [x] **XBRL Features** — Extract 16 canonical financial features from EDGAR (ATS-162)
 - [x] **Market Data** — Collect and align prices, volumes, corporate actions (ATS-163)
 - [x] **Label DB** — Build distress event label database, 5 outcome types (ATS-164)
-- [ ] **FT-Transformer** — Implement encoder for XBRL tabular features
-- [ ] **SSL Pretraining** — Masked feature reconstruction experiment
-- [ ] **Benchmark** — FT-Transformer vs. XGBoost vs. logistic regression (go/no-go gate)
-- [ ] **Data Splits** — Reproducible train/test splits and data specification doc
-- [ ] **Ablations** — Ablation studies and scaling curves
-- [ ] **Paper** — Study 0 technical report
+- [x] **FT-Transformer** — Encoder for XBRL tabular features
+- [x] **SSL Pretraining** — Masked feature reconstruction experiment
+- [x] **Benchmark** — FT-Transformer vs. XGBoost vs. logistic regression, multi-seed variance estimation (go/no-go gate)
+- [x] **Data Splits** — Reproducible time-based train/val/test splits
+- [x] **Ablations** — Ablation studies and scaling curves
+- [x] **Paper** — Study 0 technical report (`paper/study0/`)
 
 ---
 
@@ -59,6 +59,8 @@ fin-jepa/
 │   └── study0/
 ├── tests/                  # Unit + integration tests
 ├── results/                # Saved metrics, figures, paper assets
+│   └── study0/
+├── paper/                  # LaTeX source for study reports
 │   └── study0/
 ├── data/                   # Data directory (NOT committed)
 │   ├── raw/                #   EDGAR caches, parquets, market prices
@@ -215,6 +217,7 @@ python -m fin_jepa.training.pretrain_ssl experiment=study0/pretrain
 Configuration lives in `configs/study0/` (Hydra YAML). Key files:
 - `benchmark.yaml` — data paths, model hyperparameters, go/no-go gate thresholds
 - `pretrain.yaml` — SSL pretraining (mask ratio, warmup, checkpoint dir)
+- `ssl_experiment.yaml` — full SSL experiment (pretrain + fine-tune vs. scratch baseline)
 - `ablations.yaml` — ablation study configurations
 
 ---

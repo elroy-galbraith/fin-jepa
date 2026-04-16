@@ -118,3 +118,33 @@ class TestMakeDataloader:
         x, y = next(iter(loader))
         assert x.shape == (2, 1)
         assert y.shape == (2,)
+
+    def test_seeded_shuffle_deterministic(self):
+        df = pd.DataFrame({
+            "f1": np.arange(100, dtype=np.float32),
+            "label": np.ones(100, dtype=np.float32),
+        })
+        loader1 = make_dataloader(df, ["f1"], "label", batch_size=100, shuffle=True, seed=42)
+        loader2 = make_dataloader(df, ["f1"], "label", batch_size=100, shuffle=True, seed=42)
+        batch1 = next(iter(loader1))[0]
+        batch2 = next(iter(loader2))[0]
+        assert torch.equal(batch1, batch2), "Same seed should produce same shuffle order"
+
+    def test_different_seeds_differ(self):
+        df = pd.DataFrame({
+            "f1": np.arange(100, dtype=np.float32),
+            "label": np.ones(100, dtype=np.float32),
+        })
+        loader1 = make_dataloader(df, ["f1"], "label", batch_size=100, shuffle=True, seed=42)
+        loader2 = make_dataloader(df, ["f1"], "label", batch_size=100, shuffle=True, seed=99)
+        batch1 = next(iter(loader1))[0]
+        batch2 = next(iter(loader2))[0]
+        assert not torch.equal(batch1, batch2), "Different seeds should produce different order"
+
+    def test_seed_none_backward_compat(self):
+        df = pd.DataFrame({
+            "f1": np.arange(10, dtype=np.float32),
+            "label": np.ones(10, dtype=np.float32),
+        })
+        loader = make_dataloader(df, ["f1"], "label", batch_size=10, shuffle=True, seed=None)
+        _ = next(iter(loader))

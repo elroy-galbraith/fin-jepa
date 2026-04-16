@@ -402,7 +402,7 @@ def tune_ft_transformer(
             _cat_cols = categorical_cols or None
             train_loader = make_dataloader(
                 tr_df, feature_cols, _LABEL, batch_size=256, shuffle=True,
-                cat_feature_cols=_cat_cols,
+                cat_feature_cols=_cat_cols, seed=seed,
             )
             val_loader = make_dataloader(
                 va_df, feature_cols, _LABEL, batch_size=256, shuffle=False,
@@ -704,7 +704,7 @@ def run_benchmark(config) -> dict:
         seed_everything(seed)
         train_loader = make_dataloader(
             train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
-            cat_feature_cols=categorical_cols or None,
+            cat_feature_cols=categorical_cols or None, seed=seed,
         )
         val_loader = make_dataloader(
             val_valid, feature_cols, outcome, batch_size=batch_size, shuffle=False,
@@ -990,6 +990,7 @@ def run_multiseed_benchmark(
                 init_state_dict=init_state_dict,
                 cat_feature_cols=categorical_cols,
                 lr=lr,
+                seed=seed,
             )
             test_auroc = metrics.get("auroc")
             if test_auroc is not None:
@@ -1015,7 +1016,17 @@ def run_multiseed_benchmark(
                 len(aurocs),
             )
 
-    output: dict = {"multiseed": aggregated, "seeds": list(seeds)}
+    import hashlib as _hl
+
+    _fp_dict = {k: model_kwargs[k] for k in ("d_token", "n_heads", "n_layers")}
+    _fp_dict["lr"] = lr
+    _fp = _hl.sha256(json.dumps(_fp_dict, sort_keys=True).encode()).hexdigest()[:16]
+
+    output: dict = {
+        "multiseed": aggregated,
+        "seeds": list(seeds),
+        "_meta": {"config_fingerprint": _fp},
+    }
 
     results_dir = Path(_cfg(config, "results_dir", "results/study0"))
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -1256,7 +1267,7 @@ def run_walk_forward(
             eff_val = val_valid if len(val_valid) > 0 else train_valid
             train_loader = make_dataloader(
                 train_valid, feature_cols, outcome, batch_size=batch_size, shuffle=True,
-                cat_feature_cols=categorical_cols or None,
+                cat_feature_cols=categorical_cols or None, seed=seed,
             )
             val_loader = make_dataloader(
                 eff_val, feature_cols, outcome, batch_size=batch_size, shuffle=False,
