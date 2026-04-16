@@ -62,11 +62,14 @@ def _write_market_aligned(tmp_path: Path, df: pd.DataFrame | None = None) -> Pat
 
 
 def _write_edgar_index(
-    tmp_path: Path, amendments: list[tuple[str, str]] | None = None
+    tmp_path: Path,
+    amendments: list[tuple[str, str]] | list[tuple[str, str, str]] | None = None,
 ) -> None:
     """Write synthetic EDGAR quarterly index parquets.
 
-    *amendments* is a list of (cik, date_filed) tuples for 10-K/A filings.
+    *amendments* entries are either ``(cik, date_filed)`` — which defaults
+    ``form_type`` to ``"10-K/A"`` — or ``(cik, date_filed, form_type)``
+    for variants like ``"NT 10-K/A"`` or trailing-whitespace edge cases.
     """
     index_dir = tmp_path / "edgar_index"
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -80,10 +83,15 @@ def _write_edgar_index(
 
     amendment_rows = []
     if amendments:
-        for cik, date_filed in amendments:
+        for entry in amendments:
+            if len(entry) == 2:
+                cik, date_filed = entry
+                form_type = "10-K/A"
+            else:
+                cik, date_filed, form_type = entry
             amendment_rows.append(
                 {
-                    "form_type": "10-K/A",
+                    "form_type": form_type,
                     "cik": cik.zfill(10),
                     "date_filed": date_filed,
                     "company_name": f"Company {cik}",
@@ -95,6 +103,32 @@ def _write_edgar_index(
     df["date_filed"] = pd.to_datetime(df["date_filed"])
     # Write as a single quarterly index file
     df.to_parquet(index_dir / "2020_Q1.parquet", index=False)
+
+
+def _write_xbrl_registry(
+    tmp_path: Path,
+    entries: list[tuple[str, str, str]],
+) -> None:
+    """Write a synthetic ``xbrl_amendment_registry.parquet`` into raw_dir.
+
+    *entries* is a list of ``(cik, period_end, filed_date)`` tuples.  A
+    ``(cik, period_end)`` pair appearing twice is treated as an amendment
+    by :func:`_build_restate_from_xbrl_registry`.
+    """
+    rows = []
+    for cik, period_end, filed_date in entries:
+        rows.append(
+            {
+                "cik": cik.zfill(10),
+                "fiscal_year": pd.to_datetime(period_end).year,
+                "period_end": pd.to_datetime(period_end).date(),
+                "filed_date": pd.to_datetime(filed_date).date(),
+                "form": "10-K",
+            }
+        )
+    pd.DataFrame(rows).to_parquet(
+        tmp_path / "xbrl_amendment_registry.parquet", index=False
+    )
 
 
 def _write_external_csv(
@@ -120,7 +154,9 @@ class TestLabelConfig:
         cfg = LabelConfig()
         assert cfg.decline_threshold == -0.20
         assert cfg.treat_delisted_as_decline is True
-        assert cfg.restatement_source == "edgar_amendments"
+        assert cfg.restatement_source == "reconciled"
+        assert cfg.restatement_horizon_days == 1095
+        assert cfg.restatement_form_types == ("10-K/A", "10-KT/A", "NT 10-K/A")
         assert cfg.horizon_days == 365
 
     def test_custom_threshold(self):
@@ -251,6 +287,126 @@ class TestEarningsRestate:
         labels = _build_earnings_restate(grid, raw_dir, cfg)
 
         assert labels.isna().all()
+
+    # ── reconciled path ─────────────────────────────────────────────────
+
+    def test_reconciled_widened_window(self, tmp_path):
+        """10-K/A filed 900d after period_end → label=1 reconciled, 0 legacy."""
+        raw_dir = _write_market_aligned(tmp_path)
+        # CIK 1 period_end=2019-12-31; amendment filed 2022-06-15 (~900d later)
+        _write_edgar_index(tmp_path, amendments=[("1", "2022-06-15")])
+
+        grid = _make_market_aligned()[["cik", "period_end"]].copy()
+
+        legacy = _build_earnings_restate(
+            grid, raw_dir, LabelConfig(restatement_source="edgar_amendments")
+        )
+        assert legacy.iloc[0] == 0
+
+        reconciled, source = _build_earnings_restate(
+            grid, raw_dir,
+            LabelConfig(restatement_source="reconciled"),
+            return_source=True,
+        )
+        assert reconciled.iloc[0] == 1
+        assert source.iloc[0] == "edgar"
+
+    def test_reconciled_xbrl_registry_flags_refile(self, tmp_path):
+        """XBRL registry with 2 filings for same period → label=1, source=xbrl."""
+        raw_dir = _write_market_aligned(tmp_path)
+        _write_edgar_index(tmp_path, amendments=None)  # no 10-K/A in index
+        _write_xbrl_registry(
+            tmp_path,
+            entries=[
+                # CIK 1 has two 10-K filings for fy2019 → amendment
+                ("1", "2019-12-31", "2020-02-15"),
+                ("1", "2019-12-31", "2021-08-10"),
+                # CIK 2 has only one → not an amendment
+                ("2", "2019-12-31", "2020-02-15"),
+            ],
+        )
+
+        grid = _make_market_aligned()[["cik", "period_end"]].copy()
+        labels, source = _build_earnings_restate(
+            grid, raw_dir,
+            LabelConfig(restatement_source="reconciled"),
+            return_source=True,
+        )
+        assert labels.iloc[0] == 1
+        assert source.iloc[0] == "xbrl"
+        assert labels.iloc[1] == 0
+        assert source.iloc[1] == "none"
+
+    def test_reconciled_nt_10ka_form(self, tmp_path):
+        """NT 10-K/A in index → label=1 reconciled, 0 legacy."""
+        raw_dir = _write_market_aligned(tmp_path)
+        _write_edgar_index(
+            tmp_path,
+            amendments=[("1", "2020-06-15", "NT 10-K/A")],
+        )
+
+        grid = _make_market_aligned()[["cik", "period_end"]].copy()
+
+        legacy = _build_earnings_restate(
+            grid, raw_dir, LabelConfig(restatement_source="edgar_amendments")
+        )
+        assert legacy.iloc[0] == 0  # strict form-type filter rejects NT 10-K/A
+
+        reconciled = _build_earnings_restate(
+            grid, raw_dir, LabelConfig(restatement_source="reconciled")
+        )
+        assert reconciled.iloc[0] == 1
+
+    def test_reconciled_both_signals(self, tmp_path):
+        """Both EDGAR 10-K/A and XBRL refile → source=both."""
+        raw_dir = _write_market_aligned(tmp_path)
+        _write_edgar_index(tmp_path, amendments=[("1", "2020-06-15")])
+        _write_xbrl_registry(
+            tmp_path,
+            entries=[
+                ("1", "2019-12-31", "2020-02-15"),
+                ("1", "2019-12-31", "2020-06-15"),
+            ],
+        )
+
+        grid = _make_market_aligned()[["cik", "period_end"]].copy()
+        labels, source = _build_earnings_restate(
+            grid, raw_dir,
+            LabelConfig(restatement_source="reconciled"),
+            return_source=True,
+        )
+        assert labels.iloc[0] == 1
+        assert source.iloc[0] == "both"
+
+    def test_reconciled_no_data_returns_nan(self, tmp_path):
+        """Reconciled with no EDGAR index and no XBRL registry → all NaN."""
+        raw_dir = _write_market_aligned(tmp_path)
+        grid = _make_market_aligned()[["cik", "period_end"]].copy()
+        labels, source = _build_earnings_restate(
+            grid, raw_dir,
+            LabelConfig(restatement_source="reconciled"),
+            return_source=True,
+        )
+        assert labels.isna().all()
+        assert source.isna().all()
+
+    def test_form_type_trailing_space_still_matches(self, tmp_path):
+        """10-K/A with trailing whitespace in form_type still labels correctly.
+
+        The EDGAR full-index pads form_type to 12 chars, so trailing spaces
+        are normal.  Our helper strips before comparison.
+        """
+        raw_dir = _write_market_aligned(tmp_path)
+        _write_edgar_index(
+            tmp_path,
+            amendments=[("1", "2020-06-15", "10-K/A ")],  # trailing space
+        )
+
+        grid = _make_market_aligned()[["cik", "period_end"]].copy()
+        labels = _build_earnings_restate(
+            grid, raw_dir, LabelConfig(restatement_source="edgar_amendments")
+        )
+        assert labels.iloc[0] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -493,13 +649,28 @@ class TestValidateLabelDatabase:
 
 class TestBuildLabelDatabase:
     def test_output_schema(self, tmp_path):
-        """Output has exactly the expected columns."""
+        """Output has exactly the expected columns (default: reconciled adds
+        the ``earnings_restate_source`` provenance column)."""
         raw_dir = _write_market_aligned(tmp_path)
         _write_edgar_index(tmp_path)
 
         output = tmp_path / "output" / "label_database.parquet"
         df = build_label_database(raw_dir, output_path=output)
 
+        expected_cols = (
+            {"cik", "period_end", "earnings_restate_source"} | set(ALL_OUTCOMES)
+        )
+        assert set(df.columns) == expected_cols
+
+    def test_output_schema_edgar_only(self, tmp_path):
+        """Legacy edgar_amendments source omits the provenance column."""
+        raw_dir = _write_market_aligned(tmp_path)
+        _write_edgar_index(tmp_path)
+
+        cfg = LabelConfig(restatement_source="edgar_amendments")
+        df = build_label_database(
+            raw_dir, output_path=tmp_path / "out.parquet", config=cfg
+        )
         expected_cols = {"cik", "period_end"} | set(ALL_OUTCOMES)
         assert set(df.columns) == expected_cols
 

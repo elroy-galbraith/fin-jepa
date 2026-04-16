@@ -87,13 +87,19 @@ LABEL_COLS = [
     "bankruptcy",
 ]
 
+#: Label-adjacent provenance columns — not binary labels, but carried
+#: through so downstream consumers can filter or ablate by source.
+PROVENANCE_COLS = ["earnings_restate_source"]
+
 MARKET_COLS = ["fwd_ret_252d", "mkt_adj_252d", "delisted"]
 
 ID_COLS = ["cik", "ticker", "fiscal_year", "period_end", "filed_date", "sector", "sic_code"]
 
 AUDIT_COLS = ["period_end_xbrl", "period_end_label"]
 
-OUTPUT_COLS = ID_COLS + XBRL_FEATURES + LABEL_COLS + MARKET_COLS + AUDIT_COLS
+OUTPUT_COLS = (
+    ID_COLS + XBRL_FEATURES + LABEL_COLS + PROVENANCE_COLS + MARKET_COLS + AUDIT_COLS
+)
 
 
 def _elapsed(t0: float) -> str:
@@ -231,8 +237,10 @@ def build_default_config(
             if pct_match < 50.0:
                 logger.warning(
                     "  LOW CORRELATION: only %.1f%% of dropped amendments have "
-                    "earnings_restate=1. The label pipeline and XBRL pipeline may "
-                    "detect amendments differently — investigate before publication.",
+                    "earnings_restate=1. Expected ≥50%% under the reconciled "
+                    "label source. Verify that the label DB was built with "
+                    "restatement_source=\"reconciled\" and that "
+                    "xbrl_amendment_registry.parquet is up to date.",
                     pct_match,
                 )
         else:
@@ -420,6 +428,8 @@ def generate_dataset_card(
             yaml_features += f"      - name: {col}\n        dtype: date32\n"
         elif col in LABEL_COLS:
             yaml_features += f"      - name: {col}\n        dtype: int8\n"
+        elif col in PROVENANCE_COLS:
+            yaml_features += f"      - name: {col}\n        dtype: string\n"
         elif col == "delisted":
             yaml_features += f"      - name: {col}\n        dtype: bool\n"
         elif col in AUDIT_COLS:
@@ -542,7 +552,7 @@ print(train.columns.tolist())
 | Column | Definition | Source | Positive Rate |
 |--------|-----------|--------|--------------|
 | `stock_decline` | Market-adjusted 252-day return < -20% | yfinance (forward returns from filing date) | {stock_decline_rate}% |
-| `earnings_restate` | 10-K/A form type found in EDGAR quarterly index within 365 days of period_end | EDGAR quarterly index search (noisy proxy -- see note) | {earnings_restate_rate}% |
+| `earnings_restate` | Either (a) a 10-K/A-family filing (10-K/A, 10-KT/A, NT 10-K/A) within 1095 days of `period_end` in the EDGAR index, or (b) the XBRL Company Facts API reports ≥2 10-K filings for the same `(cik, period_end)`. See `earnings_restate_source` for per-row provenance. | Reconciled: EDGAR quarterly index + XBRL amendment registry | {earnings_restate_rate}% |
 | `audit_qualification` | Going-concern or adverse audit opinion | External CSV (Audit Analytics) | {audit_qualification_rate}% |
 | `sec_enforcement` | SEC enforcement action disclosure | EDGAR EFTS full-text search (noisy proxy) | {sec_enforcement_rate}% |
 | `bankruptcy` | Chapter 7/11 filing (8-K Item 1.03) | EDGAR EFTS full-text search | {bankruptcy_rate}% |
@@ -554,16 +564,18 @@ print(train.columns.tolist())
 > after their filing date are marked `delisted=True` and assigned
 > `stock_decline=1`.
 >
-> **`earnings_restate` caveat:** This label is a **noisy proxy with a high
-> false-negative rate.** The label pipeline searches the EDGAR quarterly
-> index for filings with form type `10-K/A`. However, the XBRL feature
-> pipeline independently detects ~10x more amended filings (same
-> `period_end`, different `filed_date`) than the label pipeline flags.
-> Only ~9% of XBRL-detected amendments have `earnings_restate=1`.
-> The discrepancy likely reflects differences in how each pipeline
-> resolves filing metadata. Treat this label as approximate signal,
-> not ground truth. For rigorous restatement detection, use Audit
-> Analytics or reconcile the two detection methods.
+> **`earnings_restate` reconciliation (v1.1):** The v1.0 label was a narrow
+> 10-K/A proxy within a 365-day window, and only ~9% of XBRL-detected
+> amendments carried `earnings_restate=1`.  v1.1 reconciles the two signals:
+> the label fires if either (a) a 10-K/A-family filing (including
+> `NT 10-K/A` and `10-KT/A`) appears in the EDGAR index within 1095 days
+> of `period_end`, or (b) the XBRL Company Facts API reports multiple
+> 10-K filings for the same `(cik, period_end)`.  The `earnings_restate_source`
+> column records per-row which signal fired (`edgar`, `xbrl`, `both`, or
+> `none`) so consumers can reproduce v1.0 by filtering to
+> `earnings_restate_source in ("edgar", "both")` with the narrow horizon
+> applied offline, or ablate by source in Study 1.  This is still a proxy
+> — for ground truth, use Audit Analytics.
 >
 > **`audit_qualification` coverage:** This label may be all-NaN if no
 > external Audit Analytics data was available at build time.

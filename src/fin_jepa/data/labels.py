@@ -81,10 +81,28 @@ class LabelConfig:
     treat_delisted_as_decline: bool = True
 
     #: Source for earnings restatement labels.
-    #: ``"edgar_amendments"`` — use 10-K/A filings from the EDGAR index as
-    #:   a proxy (noisy but free).
+    #: ``"reconciled"`` *(default)* — OR together the widened EDGAR 10-K/A
+    #:   match and the XBRL amendment registry (any ``(cik, period_end)`` with
+    #:   ≥2 distinct 10-K filings).  Writes an ``earnings_restate_source``
+    #:   provenance column.
+    #: ``"edgar_amendments"`` — use 10-K/A filings from the EDGAR index only.
+    #:   Strict form-type match, 365-day forward window.  Kept for tests and
+    #:   backwards-compatible rebuilds.
     #: ``"external_csv"`` — load from ``external_label_dir/earnings_restate.csv``.
-    restatement_source: str = "edgar_amendments"
+    restatement_source: str = "reconciled"
+
+    #: Forward-looking window (calendar days) used specifically for matching
+    #: 10-K/A amendments in the ``"reconciled"`` path.  Restatements are often
+    #: filed 1–3 years after the original period_end, so the default here is
+    #: wider than the general ``horizon_days``.
+    restatement_horizon_days: int = 1095
+
+    #: Form-type strings that count as restatement amendments under the
+    #: ``"reconciled"`` path.  ``"NT 10-K/A"`` = notification of late
+    #: amendment; ``"10-KT/A"`` = transition-period amendment.
+    restatement_form_types: tuple[str, ...] = (
+        "10-K/A", "10-KT/A", "NT 10-K/A",
+    )
 
     #: Source for audit qualification labels.
     #: Only ``"external_csv"`` is supported (no free structured source).
@@ -241,53 +259,101 @@ def _build_earnings_restate(
     grid: pd.DataFrame,
     raw_dir: Path,
     config: LabelConfig,
-) -> pd.Series:
+    *,
+    return_source: bool = False,
+) -> pd.Series | tuple[pd.Series, pd.Series | None]:
     """Build earnings_restate labels.
 
-    Primary source: 10-K/A filings from the cached EDGAR quarterly index
-    (proxy — not all amendments are restatements).
+    Sources (selected via ``config.restatement_source``):
+      * ``"reconciled"`` *(default)* — OR of widened EDGAR 10-K/A match and
+        XBRL amendment registry.  See :func:`_build_restate_reconciled`.
+      * ``"edgar_amendments"`` — strict 10-K/A proxy with the narrow
+        365-day window.  Kept for reproducibility of pre-v1.1 label DBs.
+      * ``"external_csv"`` — load from
+        ``{external_label_dir}/earnings_restate.csv``.
 
-    Fallback: external CSV via ``config.external_label_dir``.
+    Args:
+        grid: Observation grid with ``cik`` and ``period_end`` columns.
+        raw_dir: Root raw-data directory.
+        config: Label configuration.
+        return_source: If True, also return a source-provenance Series
+            with values in ``{"edgar", "xbrl", "both", "none", None}``.
+            ``None`` means no data source was available for that row.
 
     Returns:
-        Nullable Int8 Series aligned to *grid* index.
+        A nullable ``Int8`` Series aligned to *grid*.  If ``return_source``
+        is True, a ``(label, source)`` tuple where ``source`` is an object
+        Series or ``None`` if provenance is not tracked for this source.
     """
     if config.restatement_source == "external_csv":
         ext = _load_external_label("earnings_restate", config.external_label_dir)
         if ext is not None and "earnings_restate" in ext.columns:
-            return _merge_external_label(grid, ext, "earnings_restate")
-        logger.warning(
-            "earnings_restate: external CSV requested but not found in %s",
-            config.external_label_dir,
-        )
-        return _empty_label(grid)
+            label = _merge_external_label(grid, ext, "earnings_restate")
+        else:
+            logger.warning(
+                "earnings_restate: external CSV requested but not found in %s",
+                config.external_label_dir,
+            )
+            label = _empty_label(grid)
+        return (label, None) if return_source else label
 
-    # Load cached EDGAR quarterly index parquets
+    if config.restatement_source == "reconciled":
+        return _build_restate_reconciled(
+            grid, raw_dir, config, return_source=return_source
+        )
+
+    # Legacy "edgar_amendments": strict form-type match, narrow horizon.
+    label = _build_restate_from_edgar_index(
+        grid,
+        raw_dir,
+        horizon_days=config.horizon_days,
+        form_types=("10-K/A",),
+    )
+    if label is None:
+        label = _empty_label(grid)
+    return (label, None) if return_source else label
+
+
+def _build_restate_from_edgar_index(
+    grid: pd.DataFrame,
+    raw_dir: Path,
+    *,
+    horizon_days: int,
+    form_types: tuple[str, ...],
+) -> pd.Series | None:
+    """Match grid rows against 10-K/A-family filings in the EDGAR index.
+
+    Returns ``None`` if the index cache is unavailable (so the caller can
+    distinguish "data missing" from "no amendments found"), otherwise a
+    0/1 Int8 Series.
+    """
     index_dir = raw_dir / "edgar_index"
     if not index_dir.exists():
         logger.warning(
-            "earnings_restate: EDGAR index cache not found at %s; "
-            "returning all NaN.  Run build_company_universe() first.",
+            "earnings_restate: EDGAR index cache not found at %s.",
             index_dir,
         )
-        return _empty_label(grid)
+        return None
 
     idx_files = sorted(index_dir.glob("*.parquet"))
     if not idx_files:
         logger.warning(
-            "earnings_restate: no parquet files in %s; returning all NaN.",
+            "earnings_restate: no parquet files in %s.",
             index_dir,
         )
-        return _empty_label(grid)
+        return None
 
     filings = pd.concat(
         [pd.read_parquet(f) for f in idx_files], ignore_index=True
     )
 
-    # Filter to 10-K/A only
-    amendments = filings[filings["form_type"].str.strip() == "10-K/A"].copy()
+    form_type_stripped = filings["form_type"].astype(str).str.strip()
+    amendments = filings.loc[form_type_stripped.isin(form_types)].copy()
     if amendments.empty:
-        logger.info("earnings_restate: no 10-K/A filings found; all labels = 0.")
+        logger.info(
+            "earnings_restate: no %s filings in index; edgar signal = 0.",
+            list(form_types),
+        )
         return _empty_label(grid, fill=0)
 
     amendments["cik"] = amendments["cik"].astype(str).str.zfill(10)
@@ -295,7 +361,101 @@ def _build_earnings_restate(
         amendments["date_filed"], errors="coerce"
     )
 
-    return _match_events_to_grid(grid, amendments, "date_filed", config.horizon_days)
+    return _match_events_to_grid(grid, amendments, "date_filed", horizon_days)
+
+
+def _build_restate_from_xbrl_registry(
+    grid: pd.DataFrame,
+    raw_dir: Path,
+) -> pd.Series | None:
+    """Flag grid rows where the XBRL amendment registry shows >=2 filings.
+
+    Looks for ``xbrl_amendment_registry.parquet`` in ``raw_dir`` and in
+    the sibling ``processed/`` directory.  Returns ``None`` if no registry
+    exists.
+    """
+    candidates = [
+        raw_dir / "xbrl_amendment_registry.parquet",
+        raw_dir.parent / "processed" / "xbrl_amendment_registry.parquet",
+    ]
+    registry_path = next((p for p in candidates if p.exists()), None)
+    if registry_path is None:
+        logger.warning(
+            "earnings_restate: XBRL amendment registry not found at %s",
+            [str(p) for p in candidates],
+        )
+        return None
+
+    registry = pd.read_parquet(registry_path)
+    label = _empty_label(grid, fill=0)
+    if registry.empty:
+        return label
+
+    registry = registry.copy()
+    registry["cik"] = registry["cik"].astype(str).str.zfill(10)
+    registry["period_end"] = pd.to_datetime(
+        registry["period_end"], errors="coerce"
+    ).dt.date
+
+    counts = (
+        registry.groupby(["cik", "period_end"]).size().reset_index(name="n_filings")
+    )
+    amended = counts.loc[counts["n_filings"] >= 2, ["cik", "period_end"]]
+    if amended.empty:
+        return label
+
+    grid_work = grid[["cik", "period_end"]].copy()
+    grid_work["period_end"] = pd.to_datetime(
+        grid_work["period_end"], errors="coerce"
+    ).dt.date
+    grid_work["_grid_idx"] = grid.index
+
+    amended = amended.assign(_amended=1)
+    merged = grid_work.merge(amended, on=["cik", "period_end"], how="left")
+    hit_idx = merged.loc[merged["_amended"] == 1, "_grid_idx"].values
+    label.loc[hit_idx] = 1
+    return label
+
+
+def _build_restate_reconciled(
+    grid: pd.DataFrame,
+    raw_dir: Path,
+    config: LabelConfig,
+    *,
+    return_source: bool,
+) -> pd.Series | tuple[pd.Series, pd.Series | None]:
+    """OR the widened-EDGAR and XBRL-registry signals."""
+    edgar = _build_restate_from_edgar_index(
+        grid,
+        raw_dir,
+        horizon_days=config.restatement_horizon_days,
+        form_types=config.restatement_form_types,
+    )
+    xbrl = _build_restate_from_xbrl_registry(grid, raw_dir)
+
+    source = pd.Series([None] * len(grid), index=grid.index, dtype="object")
+
+    if edgar is None and xbrl is None:
+        logger.warning(
+            "earnings_restate (reconciled): neither EDGAR index nor XBRL "
+            "amendment registry is available; returning all NaN.",
+        )
+        label = _empty_label(grid)
+        return (label, source) if return_source else label
+
+    zeros = pd.Series([0] * len(grid), index=grid.index, dtype="Int8")
+    e_fired = (edgar if edgar is not None else zeros) == 1
+    x_fired = (xbrl if xbrl is not None else zeros) == 1
+
+    label = _empty_label(grid, fill=0)
+    label[e_fired | x_fired] = 1
+
+    source.loc[e_fired & x_fired] = "both"
+    source.loc[e_fired & ~x_fired] = "edgar"
+    source.loc[~e_fired & x_fired] = "xbrl"
+    source.loc[~e_fired & ~x_fired] = "none"
+
+    return (label, source) if return_source else label
 
 
 def _build_audit_qualification(
@@ -654,7 +814,12 @@ def build_label_database(
     grid["stock_decline"] = _compute_stock_decline(market_df, config)
 
     logger.info("  Building earnings_restate (source=%s) …", config.restatement_source)
-    grid["earnings_restate"] = _build_earnings_restate(grid, raw_dir, config)
+    restate_label, restate_source = _build_earnings_restate(
+        grid, raw_dir, config, return_source=True
+    )
+    grid["earnings_restate"] = restate_label
+    if restate_source is not None:
+        grid["earnings_restate_source"] = restate_source
 
     logger.info(
         "  Building audit_qualification (source=%s) …",
@@ -688,6 +853,8 @@ def build_label_database(
         "decline_threshold": config.decline_threshold,
         "treat_delisted_as_decline": config.treat_delisted_as_decline,
         "restatement_source": config.restatement_source,
+        "restatement_horizon_days": config.restatement_horizon_days,
+        "restatement_form_types": list(config.restatement_form_types),
         "bankruptcy_source": config.bankruptcy_source,
         "horizon_days": config.horizon_days,
         "label_coverage": report["per_label"],
