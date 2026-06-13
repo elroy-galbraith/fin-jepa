@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+ #!/usr/bin/env python
 """Script-driven runner for the two outstanding Study 0 robustness experiments.
 
 Replaces the notebook cells in ``experiments/study0/05_robustness.ipynb`` for the
@@ -53,6 +53,7 @@ from fin_jepa.data.labels import load_label_database  # noqa: E402
 from fin_jepa.data.splits import SplitConfig  # noqa: E402
 from fin_jepa.data.xbrl_loader import load_xbrl_features  # noqa: E402
 from fin_jepa.training.train_study0 import (  # noqa: E402
+    run_benchmark,
     run_walk_forward,
     tune_ft_transformer,
 )
@@ -150,6 +151,13 @@ def cmd_ft_tune(args) -> None:
         device, len(train_df), n_trials, n_splits, args.smoke,
     )
 
+    # Persisted Optuna study makes a long run resumable (skip for smoke).
+    storage = None
+    if not args.smoke:
+        db = RESULTS_DIR / "ft_tuning_optuna.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        storage = f"sqlite:///{db.as_posix()}"
+
     t0 = time.time()
     result = tune_ft_transformer(
         X_train_df=train_df,
@@ -163,6 +171,8 @@ def cmd_ft_tune(args) -> None:
         n_cat=n_cat,
         cat_cards=cat_cards,
         categorical_cols=categorical_cols,
+        storage=storage,
+        study_name="ft_study0" if storage else None,
     )
     elapsed = time.time() - t0
 
@@ -240,6 +250,101 @@ def cmd_walk_forward(args) -> None:
         )
 
 
+# ── close-out: full corrected Study 0 sequence ──────────────────────────────
+
+
+def cmd_close_out(args) -> None:
+    """Run the complete corrected close-out, decision-critical steps first.
+
+    1. FT-Transformer Optuna tuning (resumable via SQLite).
+    2. Corrected benchmark: re-tuned baselines (fixed CV) + tuned-FT gate.
+    3. Walk-forward validation using the tuned FT params.
+
+    All artifacts land in results/study0/corrected/ so existing results are
+    never clobbered.
+    """
+    import copy
+
+    cfg = _load_config()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    seed = int(cfg["training"]["seed"])
+    corrected = RESULTS_DIR / "corrected"
+    corrected.mkdir(parents=True, exist_ok=True)
+
+    smoke = args.smoke
+    n_trials = args.n_trials if args.n_trials is not None else (2 if smoke else 30)
+    n_splits = 2 if smoke else 3
+
+    # ── Step 1: FT tuning (resumable) ───────────────────────────────────
+    log.info("=" * 64)
+    log.info("STEP 1/3  FT-Transformer Optuna tuning (n_trials=%d)", n_trials)
+    splits, feature_cols, categorical_cols, n_cat, cat_cards = _build_feature_matrix(cfg)
+    tune_outcome = "stock_decline"
+    tr = splits["train"]
+    tr = tr[tr[tune_outcome].notna()]
+    y_tune = tr[tune_outcome].to_numpy(dtype=float)
+    storage = None if smoke else f"sqlite:///{(corrected / 'ft_tuning_optuna.db').as_posix()}"
+
+    t0 = time.time()
+    ft = tune_ft_transformer(
+        X_train_df=tr, y_train=y_tune, feature_cols=feature_cols, device=device,
+        search_space=cfg.get("ft_transformer_search"), n_splits=n_splits,
+        n_trials=n_trials, seed=seed, n_cat=n_cat, cat_cards=cat_cards,
+        categorical_cols=categorical_cols, storage=storage,
+        study_name="ft_study0" if storage else None,
+    )
+    best = ft["best_params"]
+    ft["_meta"] = {"elapsed_s": time.time() - t0, "n_trials": n_trials, "device": device.type}
+    for path in (corrected / "ft_transformer_tuning.json", FT_TUNE_PATH):
+        with open(path, "w") as f:
+            json.dump(ft, f, indent=2, default=str)
+    log.info("STEP 1 done in %.1f min | best=%s | val AUROC=%.4f",
+             ft["_meta"]["elapsed_s"] / 60, best, ft["mean_val_auroc"])
+
+    # ── Step 2: corrected benchmark (re-tuned baselines + tuned FT) ──────
+    log.info("=" * 64)
+    log.info("STEP 2/3  Corrected benchmark (re-tuned baselines + tuned-FT gate)")
+    cfg2 = copy.deepcopy(cfg)
+    cfg2["ft_transformer"] = dict(cfg["ft_transformer"])
+    cfg2["ft_transformer"]["d_token"] = int(best.get("d_token", cfg["ft_transformer"]["d_token"]))
+    cfg2["ft_transformer"]["n_layers"] = int(best.get("n_layers", cfg["ft_transformer"]["n_layers"]))
+    cfg2["training"] = dict(cfg["training"])
+    cfg2["training"]["learning_rate"] = float(best.get("learning_rate", cfg["training"]["learning_rate"]))
+    cfg2["baselines"] = dict(cfg.get("baselines", {}))
+    cfg2["baselines"]["tune"] = True
+    cfg2["results_dir"] = str(corrected)
+    if smoke:
+        cfg2["outcomes"] = ["stock_decline", "bankruptcy"]
+        cfg2["training"]["epochs"] = 5
+        cfg2["training"]["patience"] = 3
+        cfg2["baselines"]["n_trials"] = 3
+    t0 = time.time()
+    bench = run_benchmark(cfg2)
+    log.info("STEP 2 done in %.1f min | gate passed=%s (%d wins)",
+             (time.time() - t0) / 60, bench["gate"]["passed"], bench["gate"]["n_wins"])
+
+    # ── Step 3: walk-forward with tuned FT ──────────────────────────────
+    log.info("=" * 64)
+    log.info("STEP 3/3  Walk-forward validation (tuned FT params)")
+    cfg3 = copy.deepcopy(cfg)
+    cfg3["results_dir"] = str(corrected)
+    if smoke:
+        cfg3["outcomes"] = ["stock_decline"]
+        cfg3["rolling_split"] = {
+            "first_train_end": "2017-12-31", "val_window_years": 1,
+            "test_window_years": 2, "step_years": 1, "last_test_end": "2020-12-31",
+        }
+        cfg3["training"] = dict(cfg3["training"])
+        cfg3["training"]["epochs"] = 5
+        cfg3["training"]["patience"] = 3
+    t0 = time.time()
+    wf = run_walk_forward(cfg3, tuned_ft_params=best)
+    log.info("STEP 3 done in %.1f min | %d folds", (time.time() - t0) / 60, wf["n_folds"])
+
+    log.info("=" * 64)
+    log.info("CLOSE-OUT COMPLETE → %s", corrected)
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
@@ -261,6 +366,14 @@ def main() -> None:
     pa.add_argument("--smoke", action="store_true")
     pa.add_argument("--n-trials", type=int, default=None)
     pa.add_argument("--n-splits", type=int, default=None)
+
+    pc = sub.add_parser(
+        "close-out",
+        help="full corrected sequence: FT tune -> benchmark -> walk-forward",
+    )
+    pc.add_argument("--smoke", action="store_true", help="fast end-to-end CPU validation")
+    pc.add_argument("--n-trials", type=int, default=None)
+    pc.set_defaults(func=cmd_close_out)
 
     args = p.parse_args()
     if args.task == "all":
