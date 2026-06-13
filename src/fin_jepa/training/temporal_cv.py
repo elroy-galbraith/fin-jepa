@@ -61,11 +61,13 @@ class TemporalCV:
         if pd.api.types.is_datetime64_any_dtype(col):
             keys = col.dt.year
         elif not pd.api.types.is_numeric_dtype(col):
-            keys = pd.to_datetime(col).dt.year
+            # Coerce unparseable dates to NaT rather than raising; they are
+            # filtered out below so they never form a degenerate NaN-year fold.
+            keys = pd.to_datetime(col, errors="coerce").dt.year
         else:
             keys = col
 
-        years = sorted(keys.unique())
+        years = sorted(y for y in keys.unique() if pd.notna(y))
         n_years = len(years)
 
         if n_years <= self.n_splits:

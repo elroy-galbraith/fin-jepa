@@ -307,3 +307,23 @@ class TestTemporalCV:
             val_years = pd.to_datetime(df.iloc[val_idx]["period_end"]).dt.year.unique()
             assert list(val_years) == [expected_year]
             assert len(val_idx) == 10  # not a degenerate 1-5 row tail
+
+    def test_nat_rows_do_not_create_degenerate_year_fold(self):
+        """Rows with NaT in the date column must be excluded, not promoted to
+        a NaN "year" that yields an empty validation fold."""
+        rows = []
+        for cal_year in [2013, 2014, 2015, 2016, 2017]:
+            for i in range(10):
+                rows.append({"period_end": pd.Timestamp(f"{cal_year}-06-15"), "x": i})
+        rows.append({"period_end": pd.NaT, "x": 999})  # unparseable / missing date
+        df = pd.DataFrame(rows)
+
+        cv = TemporalCV(n_splits=3, date_col="period_end")
+        folds = list(cv.split(df))
+
+        assert len(folds) == 3
+        for fold_idx, expected_year in enumerate([2015, 2016, 2017]):
+            _, val_idx = folds[fold_idx]
+            val_years = pd.to_datetime(df.iloc[val_idx]["period_end"]).dt.year.unique()
+            assert list(val_years) == [expected_year]
+            assert len(val_idx) == 10  # NaT row never lands in a fold

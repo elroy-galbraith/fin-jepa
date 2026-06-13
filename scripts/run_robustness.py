@@ -133,7 +133,7 @@ def _build_feature_matrix(cfg: dict):
 def cmd_ft_tune(args) -> None:
     cfg = _load_config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed = int(cfg["training"]["seed"])
+    seed = int(cfg.get("training", {}).get("seed", 42))
 
     splits, feature_cols, categorical_cols, n_cat, cat_cards = _build_feature_matrix(cfg)
 
@@ -224,7 +224,7 @@ def cmd_walk_forward(args) -> None:
             "step_years": 1,
             "last_test_end": "2020-12-31",
         }
-        cfg["training"] = {**cfg["training"], "epochs": 5, "patience": 3}
+        cfg["training"] = {**cfg.get("training", {}), "epochs": 5, "patience": 3}
 
     log.info("Walk-forward | device=%s | smoke=%s | outcomes=%s",
              device, args.smoke, cfg["outcomes"])
@@ -267,7 +267,7 @@ def cmd_close_out(args) -> None:
 
     cfg = _load_config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    seed = int(cfg["training"]["seed"])
+    seed = int(cfg.get("training", {}).get("seed", 42))
     corrected = RESULTS_DIR / "corrected"
     corrected.mkdir(parents=True, exist_ok=True)
 
