@@ -272,3 +272,38 @@ class TestTemporalCV:
         cv = TemporalCV(n_splits=2, date_col="year_col")
         folds = list(cv.split(df))
         assert len(folds) == 2
+
+    def test_splits_datetime_column_by_calendar_year(self):
+        """Keying on a datetime column must group by calendar year, not by
+        each distinct timestamp.
+
+        Regression for the Study 0 tuning bug: the train split is defined by
+        ``period_end`` (datetime) but the raw ``fiscal_year`` field is
+        misaligned by an inconsistent offset.  TemporalCV used to key on
+        ``fiscal_year``, so within the period_end<=2017 train split the "last"
+        fiscal years were sparse forward-leaked tails (5 and 1 rows), giving
+        degenerate AUROC=1.0 validation folds.  Keyed on ``period_end`` the
+        folds must be the real calendar years with full row counts.
+        """
+        rows = []
+        for cal_year in [2013, 2014, 2015, 2016, 2017]:
+            for i in range(10):
+                rows.append({
+                    # varied days within the year -> many distinct timestamps
+                    "period_end": pd.Timestamp(f"{cal_year}-{(i % 12) + 1:02d}-15"),
+                    # misaligned by a non-constant offset, mimicking real data
+                    "fiscal_year": cal_year + (2 if cal_year < 2016 else 1),
+                    "x": i,
+                })
+        df = pd.DataFrame(rows)
+
+        cv = TemporalCV(n_splits=3, date_col="period_end")
+        folds = list(cv.split(df))
+
+        assert len(folds) == 3
+        # Validation folds must be the last three CALENDAR years, full-sized.
+        for fold_idx, expected_year in enumerate([2015, 2016, 2017]):
+            _, val_idx = folds[fold_idx]
+            val_years = pd.to_datetime(df.iloc[val_idx]["period_end"]).dt.year.unique()
+            assert list(val_years) == [expected_year]
+            assert len(val_idx) == 10  # not a degenerate 1-5 row tail

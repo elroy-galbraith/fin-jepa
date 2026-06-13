@@ -229,7 +229,7 @@ def tune_baseline(
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    cv = TemporalCV(n_splits=n_splits)
+    cv = TemporalCV(n_splits=n_splits, date_col="period_end")
 
     def objective(trial: optuna.Trial) -> float:
         params: dict = {}
@@ -343,7 +343,7 @@ def tune_ft_transformer(
     if fixed_params is None:
         fixed_params = {"n_heads": 8, "d_ffn_factor": 4, "dropout": 0.0}
 
-    cv = TemporalCV(n_splits=n_splits)
+    cv = TemporalCV(n_splits=n_splits, date_col="period_end")
 
     # Reduced training budget per fold during tuning (faster iteration).
     tune_epochs = 50
