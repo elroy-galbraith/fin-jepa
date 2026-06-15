@@ -64,9 +64,12 @@ models/pretrained/
 *.ckpt
 *.safetensors
 
-# Results / outputs (keep paper assets)
+# Results / outputs: track lightweight, reproducible assets (JSON metrics and
+# figures); ignore heavy/regenerable artifacts (runs, caches, sqlite, logs,
+# checkpoints — the last covered by the global *.log/*.pkl/*.pt rules).
 results/runs/
 results/cache/
+*.db
 mlruns/
 
 # Configs with secrets
@@ -106,7 +109,6 @@ htmlcov/
 
 # Outputs
 outputs/
-results/
 
 # Latex
 *.aux
