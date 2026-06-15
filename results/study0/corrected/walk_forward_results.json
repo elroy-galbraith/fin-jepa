@@ -2,155 +2,155 @@
   "walk_forward_folds": [
     {
       "fold": 0,
-      "label": "train\u22642014 \u2192 test 2016\u20132017",
+      "label": "train<=2014 -> test 2016-2017",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.6823015747665068,
-          "ft_auroc": 0.6787721171704123
+          "xgb_auroc": 0.6831422281951881,
+          "ft_auroc": 0.6819927417182681
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6356756528263603,
-          "ft_auroc": 0.6544176609213015
+          "xgb_auroc": 0.6404115104568464,
+          "ft_auroc": 0.654952074989168
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.5410136753843082,
-          "ft_auroc": 0.6961718905969256
+          "xgb_auroc": 0.5765621880614893,
+          "ft_auroc": 0.6514274306248752
         },
         "bankruptcy": {
-          "xgb_auroc": 0.5774021129581415,
-          "ft_auroc": 0.6206251251752454
+          "xgb_auroc": 0.5717629681554175,
+          "ft_auroc": 0.6028815341478069
         }
       }
     },
     {
       "fold": 1,
-      "label": "train\u22642015 \u2192 test 2017\u20132018",
+      "label": "train<=2015 -> test 2017-2018",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.6377496055078704,
-          "ft_auroc": 0.62007145146431
+          "xgb_auroc": 0.6330077837223198,
+          "ft_auroc": 0.6403138934971808
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6415028366343563,
-          "ft_auroc": 0.6616478797051242
+          "xgb_auroc": 0.6451635420676302,
+          "ft_auroc": 0.6695725583511215
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.5195912357037678,
-          "ft_auroc": 0.5016330642929108
+          "xgb_auroc": 0.4548443883482246,
+          "ft_auroc": 0.5649184575015777
         },
         "bankruptcy": {
-          "xgb_auroc": 0.6002899646999496,
-          "ft_auroc": 0.7021198040486997
+          "xgb_auroc": 0.6171700525898711,
+          "ft_auroc": 0.6697644261940782
         }
       }
     },
     {
       "fold": 2,
-      "label": "train\u22642016 \u2192 test 2018\u20132019",
+      "label": "train<=2016 -> test 2018-2019",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.5995860350445823,
-          "ft_auroc": 0.5989405987058224
+          "xgb_auroc": 0.5980944260474708,
+          "ft_auroc": 0.6015869207431936
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6640738194194337,
-          "ft_auroc": 0.682911152318862
+          "xgb_auroc": 0.6634623175622738,
+          "ft_auroc": 0.6840862015879204
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.5520482355027487,
-          "ft_auroc": 0.6004118145455262
+          "xgb_auroc": 0.5615455853086639,
+          "ft_auroc": 0.5307678666430218
         },
         "bankruptcy": {
-          "xgb_auroc": 0.6189044513476363,
-          "ft_auroc": 0.6905523158997463
+          "xgb_auroc": 0.6557093635136034,
+          "ft_auroc": 0.7225613263816981
         }
       }
     },
     {
       "fold": 3,
-      "label": "train\u22642017 \u2192 test 2019\u20132020",
+      "label": "train<=2017 -> test 2019-2020",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.6510148515799156,
-          "ft_auroc": 0.6539153077564366
+          "xgb_auroc": 0.6418578808179016,
+          "ft_auroc": 0.6373870446250901
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6783208771693756,
-          "ft_auroc": 0.6917486751309285
+          "xgb_auroc": 0.679440145414406,
+          "ft_auroc": 0.6914697513252492
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.48555070883315155,
-          "ft_auroc": 0.5361706415058556
+          "xgb_auroc": 0.5178275093641838,
+          "ft_auroc": 0.5142300033189512
         },
         "bankruptcy": {
-          "xgb_auroc": 0.6658082361637694,
-          "ft_auroc": 0.6214162513611687
+          "xgb_auroc": 0.6606046636091704,
+          "ft_auroc": 0.6948412036043483
         }
       }
     },
     {
       "fold": 4,
-      "label": "train\u22642018 \u2192 test 2020\u20132021",
+      "label": "train<=2018 -> test 2020-2021",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.6960708141224357,
-          "ft_auroc": 0.7313583106848933
+          "xgb_auroc": 0.6964112432176445,
+          "ft_auroc": 0.7362466458203605
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6770658296113523,
-          "ft_auroc": 0.6930155594423796
+          "xgb_auroc": 0.6777482795598171,
+          "ft_auroc": 0.6887483602461193
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.5033879475567767,
-          "ft_auroc": 0.47211621635373735
+          "xgb_auroc": 0.546922437626147,
+          "ft_auroc": 0.5727285062501061
         },
         "bankruptcy": {
-          "xgb_auroc": 0.6204256452993633,
-          "ft_auroc": 0.5941218656280649
+          "xgb_auroc": 0.6598664330946591,
+          "ft_auroc": 0.6344428003696333
         }
       }
     },
     {
       "fold": 5,
-      "label": "train\u22642019 \u2192 test 2021\u20132022",
+      "label": "train<=2019 -> test 2021-2022",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.6527691430147895,
-          "ft_auroc": 0.6920263504218379
+          "xgb_auroc": 0.6562378323161753,
+          "ft_auroc": 0.6902145538733405
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6691050251900014,
-          "ft_auroc": 0.6830455226058999
+          "xgb_auroc": 0.6790415829275003,
+          "ft_auroc": 0.6827441141078707
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.609478914608349,
-          "ft_auroc": 0.5678483921532819
+          "xgb_auroc": 0.616806677928442,
+          "ft_auroc": 0.6176969669299487
         },
         "bankruptcy": {
-          "xgb_auroc": 0.5748745349679159,
-          "ft_auroc": 0.6582781953009912
+          "xgb_auroc": 0.5796709195775386,
+          "ft_auroc": 0.6537339891638162
         }
       }
     },
     {
       "fold": 6,
-      "label": "train\u22642020 \u2192 test 2022\u20132023",
+      "label": "train<=2020 -> test 2022-2023",
       "outcomes": {
         "stock_decline": {
-          "xgb_auroc": 0.6043090259808008,
-          "ft_auroc": 0.6136279979601836
+          "xgb_auroc": 0.6019246204526368,
+          "ft_auroc": 0.613179636062879
         },
         "earnings_restate": {
-          "xgb_auroc": 0.6639358262133465,
-          "ft_auroc": 0.6789976945668534
+          "xgb_auroc": 0.6631417174524283,
+          "ft_auroc": 0.6781919044002835
         },
         "sec_enforcement": {
-          "xgb_auroc": 0.6588535427481255,
-          "ft_auroc": 0.6121478326456364
+          "xgb_auroc": 0.6493367052664271,
+          "ft_auroc": 0.6366231864767736
         },
         "bankruptcy": {
-          "xgb_auroc": 0.6599184347410258,
-          "ft_auroc": 0.7336813090141341
+          "xgb_auroc": 0.6665952369136933,
+          "ft_auroc": 0.6930802614780094
         }
       }
     }

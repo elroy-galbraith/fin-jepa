@@ -98,7 +98,7 @@ With all models tuned on the same protocol, the FT-Transformer wins three of the
 \subsection{Self-Supervised Pretraining}
 \label{sec:results_ssl}
 
-\Cref{tab:ssl} reports test AUROC for the tuned FT-Transformer initialized from scratch versus three SSL mask ratios. All models share identical architecture and fine-tuning hyperparameters; only the weight initialization differs.
+\Cref{tab:ssl} reports test AUROC for the tuned FT-Transformer initialized from scratch versus three SSL mask ratios. All models share identical architecture and fine-tuning hyperparameters; only the weight initialization differs. The SSL study uses the sweep architecture ($d = 192$); because it is a scratch-versus-pretrained comparison at a fixed architecture, it is self-contained and was not re-run on the Optuna-tuned architecture ($d = 128$) used for the gate and multi-seed analyses.
 
 \begin{table}[ht]
   \centering
@@ -137,22 +137,22 @@ To quantify initialization variance, we train the tuned FT-Transformer from scra
 
 \begin{table}[ht]
   \centering
-  \caption{Multi-seed test AUROC for the tuned FT-Transformer (from scratch). Mean $\pm$ std across 3 seeds.}
+  \caption{Multi-seed test AUROC for the tuned FT-Transformer (from scratch, Optuna-tuned architecture). Mean $\pm$ std across 3 seeds.}
   \label{tab:multiseed}
   \small
   \begin{tabular}{@{}lcccc@{}}
     \toprule
     Outcome & Seed 42 & Seed 123 & Seed 456 & Mean $\pm$ Std \\
     \midrule
-    \texttt{stock\_decline} & 0.660 & 0.644 & 0.646 & $0.650 \pm 0.007$ \\
-    \texttt{earnings\_restate} & 0.680 & 0.668 & 0.674 & $0.674 \pm 0.005$ \\
-    \texttt{sec\_enforcement} & 0.544 & 0.515 & 0.534 & $0.531 \pm 0.012$ \\
-    \texttt{bankruptcy} & 0.665 & 0.643 & 0.673 & $0.660 \pm 0.013$ \\
+    \texttt{stock\_decline} & 0.677 & 0.672 & 0.667 & $0.672 \pm 0.004$ \\
+    \texttt{earnings\_restate} & 0.682 & 0.653 & 0.658 & $0.664 \pm 0.013$ \\
+    \texttt{sec\_enforcement} & 0.529 & 0.486 & 0.593 & $0.536 \pm 0.044$ \\
+    \texttt{bankruptcy} & 0.658 & 0.681 & 0.658 & $0.666 \pm 0.011$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Variance is modest for the two higher-prevalence outcomes (\texttt{stock\_decline} std $= 0.007$, \texttt{earnings\_restate} std $= 0.005$) and somewhat larger for the rare-event outcomes (\texttt{sec\_enforcement} std $= 0.012$, \texttt{bankruptcy} std $= 0.013$), consistent with the small positive-class counts producing noisier gradient signals.
+Variance is modest for three of the four outcomes (\texttt{stock\_decline} std $= 0.004$, \texttt{bankruptcy} std $= 0.011$, \texttt{earnings\_restate} std $= 0.013$) but substantial for \texttt{sec\_enforcement} (std $= 0.044$; AUROC ranges 0.486--0.593 across seeds). The high rare-event variance---driven by the small positive-class count---reinforces that the \texttt{sec\_enforcement} result is the least reliable of the four, consistent with its near-chance discrimination and its walk-forward instability (\Cref{sec:results_walkforward}).
 
 \subsection{Go/No-Go Gate}
 \label{sec:results_gate}
@@ -252,25 +252,25 @@ To test whether the FT-Transformer's advantage is an artifact of the single 2020
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{../../results/study0/figures/walk_forward_delta.png}
-  \caption{Walk-forward AUROC difference (FT-Transformer minus XGBoost) across the seven expanding-window folds. The shaded band marks the two COVID-era test windows; the dotted line is the 0.01 gate margin. The \texttt{earnings\_restate} advantage is flat and consistently above the margin, whereas \texttt{bankruptcy} reverses through the COVID boundary and the rare-event \texttt{sec\_enforcement} margin decays over time.}
+  \caption{Walk-forward AUROC difference (FT-Transformer minus XGBoost) across the seven expanding-window folds. The shaded band marks the two COVID-era test windows; the dotted line is the 0.01 gate margin. The \texttt{earnings\_restate} advantage is flat and consistently above the margin; \texttt{bankruptcy} is large but dips below zero only at 2020--2021; and the rare-event \texttt{sec\_enforcement} margin is volatile, decaying over time.}
   \label{fig:walkforward}
 \end{figure}
 
 \begin{table}[ht]
   \centering
-  \caption{Walk-forward validation: FT-Transformer vs.\ XGBoost across seven expanding-window folds. ``COVID folds'' are the two folds whose test windows include 2020 (test 2019--2020 and 2020--2021).}
+  \caption{Walk-forward validation: FT-Transformer vs.\ XGBoost across seven expanding-window folds, each with its preprocessing fit on that fold's training split only. ``COVID folds'' are the two folds whose test windows include 2020 (test 2019--2020 and 2020--2021).}
   \label{tab:walkforward}
   \small
   \begin{tabular}{@{}lcccc@{}}
     \toprule
     Outcome & FT wins & Mean $\Delta$ & Range of $\Delta$ & COVID folds \\
     \midrule
-    \texttt{earnings\_restate} & 7/7 & $+0.017$ & $[+0.013,\,+0.020]$ & FT wins both \\
-    \texttt{bankruptcy} & 5/7 & $+0.043$ & $[-0.044,\,+0.102]$ & FT loses both \\
-    \texttt{stock\_decline} & 4/7 & $+0.009$ & $[-0.018,\,+0.039]$ & FT wins both \\
-    \texttt{sec\_enforcement} & 3/7 & $+0.017$ & $[-0.047,\,+0.155]$ & mixed \\
+    \texttt{earnings\_restate} & 7/7 & $+0.014$ & $[+0.004,\,+0.024]$ & FT wins both \\
+    \texttt{bankruptcy} & 6/7 & $+0.037$ & $[-0.025,\,+0.074]$ & 1 of 2 (loses 2020--21) \\
+    \texttt{stock\_decline} & 5/7 & $+0.013$ & $[-0.005,\,+0.040]$ & 1 of 2 \\
+    \texttt{sec\_enforcement} & 4/7 & $+0.024$ & $[-0.031,\,+0.110]$ & 1 of 2 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The walk-forward analysis sharpens the gate result into an outcome-specific picture. \texttt{earnings\_restate} is the one robustly stable advantage: the FT-Transformer wins all seven folds with a tight margin band and no degradation across the COVID boundary. \texttt{bankruptcy} is strong on average ($+0.043$) but regime-sensitive---it is the only outcome where the FT-Transformer loses \emph{both} COVID-era folds, indicating the advantage does not hold through the 2020--2021 disruption. \texttt{stock\_decline} is effectively a coin flip overall ($+0.009$ mean, 4/7), though the FT-Transformer does win the two COVID folds. \texttt{sec\_enforcement} is the least reliable: its 3/7 win rate and wide range ($[-0.047, +0.155]$) are dominated by a single early fold, and it loses the most recent folds---consistent with its near-chance discrimination on this extremely low-base-rate outcome. In short, the fixed-split gate is corroborated for \texttt{earnings\_restate}, partially supported for \texttt{bankruptcy}, and weak for the rare-event outcomes.
+The walk-forward analysis sharpens the gate result into an outcome-specific picture. \texttt{earnings\_restate} is the one robustly stable advantage: the FT-Transformer wins all seven folds with a tight margin band and no degradation across the COVID boundary. \texttt{bankruptcy} is strong overall ($+0.037$ mean, 6/7 folds); its only loss is the 2020--2021 window, so the advantage is largely robust but narrows through the depth of the COVID disruption. \texttt{stock\_decline} is marginal ($+0.013$ mean, 5/7), hovering near the gate margin throughout. \texttt{sec\_enforcement} is the least reliable: its 4/7 win rate and wide range ($[-0.031, +0.110]$) are dominated by the early folds, and it slips negative in the most recent windows---consistent with its near-chance discrimination and high seed variance (\Cref{sec:results_multiseed}) on this extremely low-base-rate outcome. In short, the fixed-split gate is corroborated strongly for \texttt{earnings\_restate}, well for \texttt{bankruptcy}, and only weakly for the rare-event \texttt{sec\_enforcement}.
