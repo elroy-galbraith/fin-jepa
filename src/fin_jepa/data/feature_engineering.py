@@ -451,8 +451,12 @@ class FeatureScaler:
                     f"present during fit: {missing}"
                 )
             arr = out[self._fit_cols].values
-            transformed = self._qt.transform(arr)
-            out[self._fit_cols] = transformed
+            # QuantileTransformer rejects 0-sample input; transforming an
+            # empty frame is a no-op (used by run_walk_forward's empty val
+            # split when anchoring the scaler).
+            if len(arr) > 0:
+                transformed = self._qt.transform(arr)
+                out[self._fit_cols] = transformed
         elif self.method == "zscore":
             for col in cols_present:
                 out[col] = (out[col] - self._mean[col]) / self._std[col]

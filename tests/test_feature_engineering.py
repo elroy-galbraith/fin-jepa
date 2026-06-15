@@ -475,6 +475,23 @@ class TestFeatureScaler:
         assert not result["a"].isna().any()
         assert not result["b"].isna().any()
 
+    def test_transform_empty_dataframe_returns_empty(self):
+        """Transforming a 0-row frame is a no-op, not a crash.
+
+        Regression for the walk-forward preprocessing error: build_feature_matrix
+        transforms every split, and run_walk_forward's scaler-anchoring step
+        intentionally produces an empty validation split (val_end == train_end).
+        QuantileTransformer rejects 0-sample input, so transform() must
+        short-circuit on empty frames.
+        """
+        df = self._make_train_df(200)
+        scaler = FeatureScaler(method="quantile")
+        scaler.fit(df, ["a", "b", "c"])
+        empty = df.iloc[0:0].copy()
+        result = scaler.transform(empty)
+        assert len(result) == 0
+        assert list(result.columns) == list(empty.columns)
+
     def test_train_only_statistics(self):
         train = pd.DataFrame({"a": [10.0, 20.0, 30.0, 40.0, 50.0]})
         val = pd.DataFrame({"a": [100.0, 200.0]})

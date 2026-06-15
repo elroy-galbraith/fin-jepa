@@ -229,7 +229,7 @@ def tune_baseline(
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    cv = TemporalCV(n_splits=n_splits)
+    cv = TemporalCV(n_splits=n_splits, date_col="period_end")
 
     def objective(trial: optuna.Trial) -> float:
         params: dict = {}
@@ -294,6 +294,8 @@ def tune_ft_transformer(
     cat_cards: list[int] | None = None,
     categorical_cols: list[str] | None = None,
     fixed_params: dict | None = None,
+    storage: str | None = None,
+    study_name: str | None = None,
 ) -> dict:
     """Tune FT-Transformer hyperparameters using temporal CV and Optuna.
 
@@ -343,7 +345,7 @@ def tune_ft_transformer(
     if fixed_params is None:
         fixed_params = {"n_heads": 8, "d_ffn_factor": 4, "dropout": 0.0}
 
-    cv = TemporalCV(n_splits=n_splits)
+    cv = TemporalCV(n_splits=n_splits, date_col="period_end")
 
     # Reduced training budget per fold during tuning (faster iteration).
     tune_epochs = 50
@@ -429,11 +431,21 @@ def tune_ft_transformer(
 
         return float(np.mean(aurocs)) if aurocs else 0.0
 
+    # Persisted storage (e.g. sqlite:///path.db) makes a long tuning run
+    # resumable: completed trials are reloaded and only the remainder run.
     study = optuna.create_study(
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=seed),
+        storage=storage,
+        study_name=study_name,
+        load_if_exists=storage is not None,
     )
-    study.optimize(objective, n_trials=n_trials)
+    n_done = len([t for t in study.trials if t.state.is_finished()])
+    remaining = max(0, n_trials - n_done)
+    if n_done:
+        log.info("  FT tuning resume: %d/%d trials already done", n_done, n_trials)
+    if remaining:
+        study.optimize(objective, n_trials=remaining)
 
     all_trials = [
         {"number": t.number, "params": t.params, "value": t.value}

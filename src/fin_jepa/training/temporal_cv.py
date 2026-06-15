@@ -49,8 +49,25 @@ class TemporalCV:
         ------
         tuple of ndarray
             Integer indices into *df* for the train and validation sets.
+
+        Notes
+        -----
+        If *date_col* is a datetime column it is grouped by **calendar year**
+        (``.dt.year``), not by each distinct timestamp.  This is required when
+        keying on ``period_end``: otherwise every filing date becomes its own
+        "year" and the folds collapse to single rows.
         """
-        years = sorted(df[self.date_col].unique())
+        col = df[self.date_col]
+        if pd.api.types.is_datetime64_any_dtype(col):
+            keys = col.dt.year
+        elif not pd.api.types.is_numeric_dtype(col):
+            # Coerce unparseable dates to NaT rather than raising; they are
+            # filtered out below so they never form a degenerate NaN-year fold.
+            keys = pd.to_datetime(col, errors="coerce").dt.year
+        else:
+            keys = col
+
+        years = sorted(y for y in keys.unique() if pd.notna(y))
         n_years = len(years)
 
         if n_years <= self.n_splits:
@@ -62,8 +79,8 @@ class TemporalCV:
         # Reserve the last n_splits years as validation years
         val_years = years[n_years - self.n_splits :]
         for val_year in val_years:
-            train_mask = df[self.date_col] < val_year
-            val_mask = df[self.date_col] == val_year
+            train_mask = keys < val_year
+            val_mask = keys == val_year
             yield (
                 np.where(train_mask)[0],
                 np.where(val_mask)[0],
