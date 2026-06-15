@@ -7,6 +7,7 @@ from fin_jepa.data.splits import (
     RollingSplitConfig,
     SplitConfig,
     describe_splits,
+    make_rolling_split_configs,
     make_rolling_splits,
     make_splits,
 )
@@ -119,6 +120,45 @@ class TestRollingSplits:
 # ---------------------------------------------------------------------------
 # describe_splits
 # ---------------------------------------------------------------------------
+
+
+class TestRollingSplitConfigs:
+    """Tests for make_rolling_split_configs (per-fold leak-free preprocessing)."""
+
+    @pytest.fixture()
+    def config(self):
+        return RollingSplitConfig(
+            first_train_end="2014-12-31",
+            val_window_years=1,
+            test_window_years=2,
+            step_years=1,
+            last_test_end="2023-12-31",
+        )
+
+    def test_generates_one_config_per_fold(self, config):
+        cfgs = make_rolling_split_configs(config)
+        # train_end 2014..2020 -> 7 folds (next would test through 2024 > 2023)
+        assert len(cfgs) == 7
+        assert cfgs[0].train_end == "2014-12-31"
+        assert cfgs[0].val_end == "2015-12-31"
+        assert cfgs[0].test_end == "2017-12-31"
+        assert cfgs[-1].train_end == "2020-12-31"
+        assert cfgs[-1].test_end == "2023-12-31"
+        for c in cfgs:
+            assert pd.Timestamp(c.test_end) <= pd.Timestamp(config.last_test_end)
+
+    def test_configs_reproduce_make_rolling_splits_folds(self, config):
+        """Applying each config via make_splits must yield the same rows as
+        make_rolling_splits, so per-fold preprocessing is a drop-in that only
+        changes *where* normalization is fit, not the fold membership."""
+        df = _make_quarterly_df(start="2010-01-01", periods=60)
+        folds = make_rolling_splits(df, config)
+        cfgs = make_rolling_split_configs(config)
+        assert len(cfgs) == len(folds)
+        for fold, cfg in zip(folds, cfgs):
+            ref = make_splits(df, cfg)
+            for part in ("train", "val", "test"):
+                assert set(ref[part].index) == set(fold[part].index)
 
 
 class TestDescribeSplits:
