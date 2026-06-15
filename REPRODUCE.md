@@ -50,12 +50,17 @@ Notes:
 
 ## 2. Figures
 
-`plot_walk_forward.py` (step 6 above) regenerates the walk-forward figure from the
-committed JSON. The remaining five figures — `sweep_heatmap`, `baseline_auroc`,
-`final_benchmark_all_models`, `bootstrap_ci_forest_plot`, `ssl_loss_curves` — are
-currently produced by the notebooks (`02`–`04`) and are **not yet scripted**
-(tracked as a tidy-up item). `sweep_heatmap` additionally requires
-`ft_sweep_results.json` (the 36-config grid sweep, produced by `02_hp_sweep.ipynb`).
+Two scripts regenerate figures from committed JSON:
+
+```bash
+python scripts/plot_walk_forward.py   # -> walk_forward_delta.png
+python scripts/plot_benchmarks.py     # -> baseline_auroc.png, final_benchmark_all_models.png, bootstrap_ci_forest_plot.png
+```
+
+The remaining two figures are **not yet scripted** and are produced by the
+notebooks: `sweep_heatmap.png` (needs `ft_sweep_results.json`, the 36-config grid
+sweep from `02_hp_sweep.ipynb`) and `ssl_loss_curves.png` (SSL pretraining loss
+history from `03_ssl_pretraining.ipynb`).
 
 ## Artifact → paper map (summary)
 
