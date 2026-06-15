@@ -88,6 +88,41 @@ def make_rolling_splits(
     return folds
 
 
+def make_rolling_split_configs(config: RollingSplitConfig) -> list[SplitConfig]:
+    """Return one :class:`SplitConfig` per expanding-window walk-forward fold.
+
+    Each config has ``train_end`` at the fold's cutoff, a ``val_window_years``
+    validation window, and a ``test_window_years`` test window — the same
+    windows as :func:`make_rolling_splits`.  Passing each config to
+    ``build_feature_matrix`` lets every fold fit its normalization (and any
+    coverage pruning) on that fold's training split only, avoiding the
+    look-ahead that arises from sharing one scaler across folds.
+    """
+    train_end = pd.Timestamp(config.first_train_end)
+    last_test = pd.Timestamp(config.last_test_end)
+    step = pd.DateOffset(years=config.step_years)
+    val_offset = pd.DateOffset(years=config.val_window_years)
+    test_offset = pd.DateOffset(years=config.test_window_years)
+
+    configs: list[SplitConfig] = []
+    while True:
+        val_end = train_end + val_offset
+        test_end = val_end + test_offset
+        if test_end > last_test:
+            break
+        configs.append(
+            SplitConfig(
+                train_end=train_end.strftime("%Y-%m-%d"),
+                val_end=val_end.strftime("%Y-%m-%d"),
+                test_end=test_end.strftime("%Y-%m-%d"),
+                date_col=config.date_col,
+            )
+        )
+        train_end = train_end + step
+
+    return configs
+
+
 def describe_splits(
     splits: dict[str, pd.DataFrame] | list[dict[str, pd.DataFrame]],
     date_col: str = "period_end",
