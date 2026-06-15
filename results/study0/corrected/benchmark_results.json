@@ -810,8 +810,8 @@
       "sector_stratified": {
         "ft_transformer": {
           "Consumer NonDurables": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 451,
             "n_positive": 0
           },
@@ -834,8 +834,8 @@
             "n_positive": 1
           },
           "Chemicals": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 304,
             "n_positive": 0
           },
@@ -846,8 +846,8 @@
             "n_positive": 5
           },
           "Telecom": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 137,
             "n_positive": 0
           },
@@ -884,8 +884,8 @@
         },
         "xgboost": {
           "Consumer NonDurables": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 451,
             "n_positive": 0
           },
@@ -908,8 +908,8 @@
             "n_positive": 1
           },
           "Chemicals": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 304,
             "n_positive": 0
           },
@@ -920,8 +920,8 @@
             "n_positive": 5
           },
           "Telecom": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 137,
             "n_positive": 0
           },
@@ -1154,8 +1154,8 @@
             "n_positive": 22
           },
           "Chemicals": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 304,
             "n_positive": 0
           },
@@ -1228,8 +1228,8 @@
             "n_positive": 22
           },
           "Chemicals": {
-            "auroc": NaN,
-            "auprc": NaN,
+            "auroc": null,
+            "auprc": null,
             "n_samples": 304,
             "n_positive": 0
           },
