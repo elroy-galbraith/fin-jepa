@@ -35,7 +35,15 @@ From the 16 raw XBRL features, we derive two additional feature sets:
   Z = 1.2\,X_1 + 1.4\,X_2 + 3.3\,X_3 + 0.6\,X_4 + 1.0\,X_5
   \label{eq:altman}
 \end{equation}
-where $X_1 = \text{working capital} / \text{total assets}$, $X_2 = \text{retained earnings} / \text{total assets}$, $X_3 = \text{operating income} / \text{total assets}$, $X_4 = \text{equity} / \text{total liabilities}$, and $X_5 = \text{revenue} / \text{total assets}$. All divisions use a minimum absolute denominator threshold of $10^{-8}$ to avoid numerical instability, returning NaN where the denominator is effectively zero.
+where
+\begin{align*}
+  X_1 &= \text{working capital} / \text{total assets}, &
+  X_2 &= \text{retained earnings} / \text{total assets}, \\
+  X_3 &= \text{operating income} / \text{total assets}, &
+  X_4 &= \text{equity} / \text{total liabilities}, \\
+  X_5 &= \text{revenue} / \text{total assets}. &&
+\end{align*}
+All divisions use a minimum absolute denominator threshold of $10^{-8}$ to avoid numerical instability, returning NaN where the denominator is effectively zero.
 
 \paragraph{Year-over-year changes (16 features).} For each of the 16 raw XBRL features, we compute the year-over-year percentage change as $(x_t - x_{t-1}) / |x_{t-1}|$. Using the absolute value of the prior-year value in the denominator handles sign changes (e.g., a firm moving from negative to positive net income). The first observation per company receives NaN by construction and is flagged with \texttt{is\_first\_year}${}= 1$.
 
@@ -53,7 +61,7 @@ Financial features exhibit extreme tail behavior that renders standard z-score n
 
   \item \textbf{Winsorization.} Values are clipped to the 1st and 99th percentile bounds computed on the training split, attenuating the influence of extreme outliers.
 
-  \item \textbf{Quantile transformation.} We apply scikit-learn's \texttt{QuantileTransformer} with \texttt{output\_distribution='normal'} and up to 1{,}000 quantiles (minimum~2), which maps the empirical rank distribution of each feature to a standard normal distribution. This is the default normalization method; z-score standardization is available as an alternative.
+  \item \textbf{Quantile transformation.} We apply scikit-learn's \texttt{Quantile\allowbreak Transformer} with \texttt{output\_distribution='normal'} and up to 1{,}000 quantiles (minimum~2), which maps the empirical rank distribution of each feature to a standard normal distribution. This is the default normalization method; z-score standardization is available as an alternative.
 \end{enumerate}
 
 Features with less than 50\% non-null coverage in the training split are pruned before normalization. This threshold is applied at the training-split level to prevent information leakage from the validation or test periods.

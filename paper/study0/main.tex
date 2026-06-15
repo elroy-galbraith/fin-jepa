@@ -16,6 +16,11 @@
 \usepackage{microtype}
 \usepackage{url}
 
+% Allow line breaks after underscores in code identifiers (snake_case) so long
+% \texttt{} tokens don't produce overfull boxes. Breaks without inserting a hyphen
+% (the underscore stays at the end of the line).
+\renewcommand{\_}{\textunderscore\allowbreak}
+
 % --- TODO macro ---
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
