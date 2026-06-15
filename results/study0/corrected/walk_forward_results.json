@@ -1,0 +1,165 @@
+{
+  "walk_forward_folds": [
+    {
+      "fold": 0,
+      "label": "train\u22642014 \u2192 test 2016\u20132017",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.6823015747665068,
+          "ft_auroc": 0.6787721171704123
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6356756528263603,
+          "ft_auroc": 0.6544176609213015
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.5410136753843082,
+          "ft_auroc": 0.6961718905969256
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.5774021129581415,
+          "ft_auroc": 0.6206251251752454
+        }
+      }
+    },
+    {
+      "fold": 1,
+      "label": "train\u22642015 \u2192 test 2017\u20132018",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.6377496055078704,
+          "ft_auroc": 0.62007145146431
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6415028366343563,
+          "ft_auroc": 0.6616478797051242
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.5195912357037678,
+          "ft_auroc": 0.5016330642929108
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.6002899646999496,
+          "ft_auroc": 0.7021198040486997
+        }
+      }
+    },
+    {
+      "fold": 2,
+      "label": "train\u22642016 \u2192 test 2018\u20132019",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.5995860350445823,
+          "ft_auroc": 0.5989405987058224
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6640738194194337,
+          "ft_auroc": 0.682911152318862
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.5520482355027487,
+          "ft_auroc": 0.6004118145455262
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.6189044513476363,
+          "ft_auroc": 0.6905523158997463
+        }
+      }
+    },
+    {
+      "fold": 3,
+      "label": "train\u22642017 \u2192 test 2019\u20132020",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.6510148515799156,
+          "ft_auroc": 0.6539153077564366
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6783208771693756,
+          "ft_auroc": 0.6917486751309285
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.48555070883315155,
+          "ft_auroc": 0.5361706415058556
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.6658082361637694,
+          "ft_auroc": 0.6214162513611687
+        }
+      }
+    },
+    {
+      "fold": 4,
+      "label": "train\u22642018 \u2192 test 2020\u20132021",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.6960708141224357,
+          "ft_auroc": 0.7313583106848933
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6770658296113523,
+          "ft_auroc": 0.6930155594423796
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.5033879475567767,
+          "ft_auroc": 0.47211621635373735
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.6204256452993633,
+          "ft_auroc": 0.5941218656280649
+        }
+      }
+    },
+    {
+      "fold": 5,
+      "label": "train\u22642019 \u2192 test 2021\u20132022",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.6527691430147895,
+          "ft_auroc": 0.6920263504218379
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6691050251900014,
+          "ft_auroc": 0.6830455226058999
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.609478914608349,
+          "ft_auroc": 0.5678483921532819
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.5748745349679159,
+          "ft_auroc": 0.6582781953009912
+        }
+      }
+    },
+    {
+      "fold": 6,
+      "label": "train\u22642020 \u2192 test 2022\u20132023",
+      "outcomes": {
+        "stock_decline": {
+          "xgb_auroc": 0.6043090259808008,
+          "ft_auroc": 0.6136279979601836
+        },
+        "earnings_restate": {
+          "xgb_auroc": 0.6639358262133465,
+          "ft_auroc": 0.6789976945668534
+        },
+        "sec_enforcement": {
+          "xgb_auroc": 0.6588535427481255,
+          "ft_auroc": 0.6121478326456364
+        },
+        "bankruptcy": {
+          "xgb_auroc": 0.6599184347410258,
+          "ft_auroc": 0.7336813090141341
+        }
+      }
+    }
+  ],
+  "n_folds": 7,
+  "tuned_xgb_params": null,
+  "tuned_ft_params": {
+    "learning_rate": 0.000988651746928081,
+    "n_layers": 3,
+    "d_token": 128
+  }
+}

@@ -1,0 +1,285 @@
+{
+  "best_params": {
+    "learning_rate": 0.000988651746928081,
+    "n_layers": 3,
+    "d_token": 128
+  },
+  "mean_val_auroc": 0.7171178884531715,
+  "all_trials": [
+    {
+      "number": 0,
+      "params": {
+        "learning_rate": 0.00011155792840695785,
+        "n_layers": 2,
+        "d_token": 128
+      },
+      "value": 0.714151383038281
+    },
+    {
+      "number": 1,
+      "params": {
+        "learning_rate": 0.0006254642575696304,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7121666240008558
+    },
+    {
+      "number": 2,
+      "params": {
+        "learning_rate": 5.6756895543365e-05,
+        "n_layers": 4,
+        "d_token": 256
+      },
+      "value": 0.7091599801156958
+    },
+    {
+      "number": 3,
+      "params": {
+        "learning_rate": 4.892755234081991e-05,
+        "n_layers": 4,
+        "d_token": 128
+      },
+      "value": 0.7089523082051219
+    },
+    {
+      "number": 4,
+      "params": {
+        "learning_rate": 0.00023949519801130003,
+        "n_layers": 3,
+        "d_token": 256
+      },
+      "value": 0.7129106539334847
+    },
+    {
+      "number": 5,
+      "params": {
+        "learning_rate": 0.0005107547260808598,
+        "n_layers": 4,
+        "d_token": 256
+      },
+      "value": 0.7133401329655441
+    },
+    {
+      "number": 6,
+      "params": {
+        "learning_rate": 3.384471042326e-05,
+        "n_layers": 2,
+        "d_token": 256
+      },
+      "value": 0.7106311192491922
+    },
+    {
+      "number": 7,
+      "params": {
+        "learning_rate": 5.736304223989419e-05,
+        "n_layers": 2,
+        "d_token": 256
+      },
+      "value": 0.7111320632101664
+    },
+    {
+      "number": 8,
+      "params": {
+        "learning_rate": 4.0915193103158576e-05,
+        "n_layers": 4,
+        "d_token": 256
+      },
+      "value": 0.7064454000504385
+    },
+    {
+      "number": 9,
+      "params": {
+        "learning_rate": 0.00010481255630437918,
+        "n_layers": 3,
+        "d_token": 256
+      },
+      "value": 0.7144948590981898
+    },
+    {
+      "number": 10,
+      "params": {
+        "learning_rate": 0.00015665375181419475,
+        "n_layers": 3,
+        "d_token": 192
+      },
+      "value": 0.7117833797455978
+    },
+    {
+      "number": 11,
+      "params": {
+        "learning_rate": 0.0001222679153743104,
+        "n_layers": 2,
+        "d_token": 128
+      },
+      "value": 0.713727328963108
+    },
+    {
+      "number": 12,
+      "params": {
+        "learning_rate": 8.463183237440765e-05,
+        "n_layers": 3,
+        "d_token": 192
+      },
+      "value": 0.7132530640059175
+    },
+    {
+      "number": 13,
+      "params": {
+        "learning_rate": 0.0002864843244441031,
+        "n_layers": 2,
+        "d_token": 128
+      },
+      "value": 0.7153269029184877
+    },
+    {
+      "number": 14,
+      "params": {
+        "learning_rate": 0.00029216871654967467,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7145117417492098
+    },
+    {
+      "number": 15,
+      "params": {
+        "learning_rate": 0.0003048182370980774,
+        "n_layers": 2,
+        "d_token": 128
+      },
+      "value": 0.7116771088737504
+    },
+    {
+      "number": 16,
+      "params": {
+        "learning_rate": 0.0003784382270012733,
+        "n_layers": 2,
+        "d_token": 128
+      },
+      "value": 0.7135755787261516
+    },
+    {
+      "number": 17,
+      "params": {
+        "learning_rate": 0.000988651746928081,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7171178884531715
+    },
+    {
+      "number": 18,
+      "params": {
+        "learning_rate": 0.0009595743344707422,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7150423531538074
+    },
+    {
+      "number": 19,
+      "params": {
+        "learning_rate": 0.00098612884146445,
+        "n_layers": 2,
+        "d_token": 192
+      },
+      "value": 0.7107598059030491
+    },
+    {
+      "number": 20,
+      "params": {
+        "learning_rate": 0.0006201254849164473,
+        "n_layers": 2,
+        "d_token": 128
+      },
+      "value": 0.7136796502781438
+    },
+    {
+      "number": 21,
+      "params": {
+        "learning_rate": 0.0009757465972200633,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7150963802316072
+    },
+    {
+      "number": 22,
+      "params": {
+        "learning_rate": 0.0007327723493721281,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7124727339243094
+    },
+    {
+      "number": 23,
+      "params": {
+        "learning_rate": 0.0004821049282915378,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7118029812250312
+    },
+    {
+      "number": 24,
+      "params": {
+        "learning_rate": 0.0002128647454326196,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7156332830596434
+    },
+    {
+      "number": 25,
+      "params": {
+        "learning_rate": 0.00020668941673816419,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7132032027438072
+    },
+    {
+      "number": 26,
+      "params": {
+        "learning_rate": 0.00016730437496154804,
+        "n_layers": 3,
+        "d_token": 192
+      },
+      "value": 0.7115445483093866
+    },
+    {
+      "number": 27,
+      "params": {
+        "learning_rate": 0.00044310331443864415,
+        "n_layers": 3,
+        "d_token": 128
+      },
+      "value": 0.7140036930427248
+    },
+    {
+      "number": 28,
+      "params": {
+        "learning_rate": 0.00033089495550930696,
+        "n_layers": 4,
+        "d_token": 128
+      },
+      "value": 0.7158760215818943
+    },
+    {
+      "number": 29,
+      "params": {
+        "learning_rate": 0.0002285091237951919,
+        "n_layers": 4,
+        "d_token": 128
+      },
+      "value": 0.7147198767985606
+    }
+  ],
+  "_meta": {
+    "elapsed_s": 54427.92198014259,
+    "n_trials": 30,
+    "device": "cpu"
+  }
+}

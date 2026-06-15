@@ -14,7 +14,7 @@ We adopt the FT-Transformer architecture of \citet{gorishniy2021revisiting} as o
 
 Default hyperparameters: $d = 192$ (token dimension), $h = 8$ (attention heads), $L = 3$ (layers), $f = 4$ (FFN expansion factor), dropout $= 0.0$. These follow the recommendations in \citet{gorishniy2021revisiting} for medium-sized tabular datasets.
 
-\paragraph{Hyperparameter selection.} We conduct a grid search over 36 configurations: learning rate $\in \{10^{-3}, 3{\times}10^{-4}, 10^{-4}, 3{\times}10^{-5}\}$, number of layers $L \in \{2, 3, 4\}$, and token dimension $d \in \{128, 192, 256\}$, with the remaining hyperparameters held at their defaults. The best configuration is selected by mean test AUROC across all evaluable outcomes. All other training settings (optimizer, early stopping, batch size) are held constant across the sweep.
+\paragraph{Hyperparameter selection.} We conduct a grid search over 36 configurations: learning rate $\in \{10^{-3}, 3{\times}10^{-4}, 10^{-4}, 3{\times}10^{-5}\}$, number of layers $L \in \{2, 3, 4\}$, and token dimension $d \in \{128, 192, 256\}$, with the remaining hyperparameters held at their defaults. The best configuration is selected by mean test AUROC across all evaluable outcomes. All other training settings (optimizer, early stopping, batch size) are held constant across the sweep. For the like-for-like tuned comparison (\Cref{sec:results_tuned}), we additionally tune the FT-Transformer with Optuna (30 trials, TPE sampler) over the same learning-rate, layer, and token-dimension ranges, selecting on 3-fold expanding-window temporal cross-validation---the identical protocol used for the baselines.
 
 \subsection{Baseline Models}
 \label{sec:baselines}
@@ -27,7 +27,7 @@ We compare the FT-Transformer against three baseline models spanning classical a
 
 \paragraph{Histogram Gradient-Boosted Trees (GBT).} Scikit-learn's \texttt{HistGradientBoostingClassifier} with 500 iterations, learning rate 0.05, max depth~6, minimum 20 samples per leaf, balanced class weighting. This model natively handles NaN values, making it suitable for evaluation on raw XBRL features with minimal preprocessing.
 
-All baseline hyperparameters use default (untuned) values for the initial benchmark. Optional Optuna-based temporal cross-validation tuning is supported (30 trials, 3-fold expanding-window CV) but is disabled in the default configuration.
+All baseline hyperparameters use default (untuned) values for the initial benchmark (\Cref{tab:auroc}). Optuna-based temporal cross-validation tuning (30 trials, 3-fold expanding-window CV) is enabled for the like-for-like tuned comparison (\Cref{sec:results_tuned}).
 
 \subsection{Self-Supervised Pretraining}
 \label{sec:ssl}

@@ -1,0 +1,602 @@
+{
+  "stock_decline": {
+    "ft_transformer": {
+      "Consumer NonDurables": {
+        "auroc": 0.6898527004909983,
+        "auprc": 0.787801208016943,
+        "n_samples": 451,
+        "n_positive": 282
+      },
+      "Consumer Durables": {
+        "auroc": 0.7332424448988867,
+        "auprc": 0.8106774623310444,
+        "n_samples": 271,
+        "n_positive": 163
+      },
+      "Manufacturing": {
+        "auroc": 0.6683163972691694,
+        "auprc": 0.672679706626711,
+        "n_samples": 955,
+        "n_positive": 487
+      },
+      "Energy": {
+        "auroc": 0.6320251937984496,
+        "auprc": 0.5706763880282678,
+        "n_samples": 412,
+        "n_positive": 172
+      },
+      "Chemicals": {
+        "auroc": 0.6851696597979084,
+        "auprc": 0.7190088928778137,
+        "n_samples": 304,
+        "n_positive": 173
+      },
+      "Business Equipment": {
+        "auroc": 0.6786353651288074,
+        "auprc": 0.7490693313142838,
+        "n_samples": 1896,
+        "n_positive": 1177
+      },
+      "Telecom": {
+        "auroc": 0.5521839080459771,
+        "auprc": 0.7086367202091957,
+        "n_samples": 137,
+        "n_positive": 87
+      },
+      "Utilities": {
+        "auroc": 0.602539718057731,
+        "auprc": 0.589866885377021,
+        "n_samples": 382,
+        "n_positive": 164
+      },
+      "Shops": {
+        "auroc": 0.7205653775181274,
+        "auprc": 0.7501595437340037,
+        "n_samples": 724,
+        "n_positive": 383
+      },
+      "Health Care": {
+        "auroc": 0.65763459380464,
+        "auprc": 0.832509729862891,
+        "n_samples": 2964,
+        "n_positive": 2169
+      },
+      "Finance": {
+        "auroc": 0.6140624538309887,
+        "auprc": 0.6339705954679471,
+        "n_samples": 3413,
+        "n_positive": 1747
+      },
+      "Other": {
+        "auroc": 0.6638892537019405,
+        "auprc": 0.7339832287372016,
+        "n_samples": 2246,
+        "n_positive": 1330
+      }
+    },
+    "xgboost": {
+      "Consumer NonDurables": {
+        "auroc": 0.6629736875236056,
+        "auprc": 0.7561903108961193,
+        "n_samples": 451,
+        "n_positive": 282
+      },
+      "Consumer Durables": {
+        "auroc": 0.6901840490797546,
+        "auprc": 0.7757411188527923,
+        "n_samples": 271,
+        "n_positive": 163
+      },
+      "Manufacturing": {
+        "auroc": 0.6515733866863231,
+        "auprc": 0.6641425493799422,
+        "n_samples": 955,
+        "n_positive": 487
+      },
+      "Energy": {
+        "auroc": 0.6228682170542637,
+        "auprc": 0.565021952011808,
+        "n_samples": 412,
+        "n_positive": 172
+      },
+      "Chemicals": {
+        "auroc": 0.68389004103605,
+        "auprc": 0.715584977939191,
+        "n_samples": 304,
+        "n_positive": 173
+      },
+      "Business Equipment": {
+        "auroc": 0.6688948943768072,
+        "auprc": 0.7541638719211172,
+        "n_samples": 1896,
+        "n_positive": 1177
+      },
+      "Telecom": {
+        "auroc": 0.5370114942528735,
+        "auprc": 0.702165303060375,
+        "n_samples": 137,
+        "n_positive": 87
+      },
+      "Utilities": {
+        "auroc": 0.6235735063772656,
+        "auprc": 0.5843374357647274,
+        "n_samples": 382,
+        "n_positive": 164
+      },
+      "Shops": {
+        "auroc": 0.696109584006493,
+        "auprc": 0.7179017843181592,
+        "n_samples": 724,
+        "n_positive": 383
+      },
+      "Health Care": {
+        "auroc": 0.6496492891544954,
+        "auprc": 0.8245731490130375,
+        "n_samples": 2964,
+        "n_positive": 2169
+      },
+      "Finance": {
+        "auroc": 0.6047341661335398,
+        "auprc": 0.6272195196752042,
+        "n_samples": 3413,
+        "n_positive": 1747
+      },
+      "Other": {
+        "auroc": 0.645137406835867,
+        "auprc": 0.722023128788241,
+        "n_samples": 2246,
+        "n_positive": 1330
+      }
+    }
+  },
+  "earnings_restate": {
+    "ft_transformer": {
+      "Consumer NonDurables": {
+        "auroc": 0.6699954086317722,
+        "auprc": 0.3450695537664955,
+        "n_samples": 451,
+        "n_positive": 99
+      },
+      "Consumer Durables": {
+        "auroc": 0.7824995952727861,
+        "auprc": 0.510490768999379,
+        "n_samples": 271,
+        "n_positive": 58
+      },
+      "Manufacturing": {
+        "auroc": 0.7476487070119394,
+        "auprc": 0.3305667381571185,
+        "n_samples": 955,
+        "n_positive": 137
+      },
+      "Energy": {
+        "auroc": 0.6651343705799151,
+        "auprc": 0.4477930552464402,
+        "n_samples": 415,
+        "n_positive": 112
+      },
+      "Chemicals": {
+        "auroc": 0.8037566582562378,
+        "auprc": 0.4806182102511799,
+        "n_samples": 304,
+        "n_positive": 58
+      },
+      "Business Equipment": {
+        "auroc": 0.6835384955902883,
+        "auprc": 0.3324413776702095,
+        "n_samples": 1896,
+        "n_positive": 390
+      },
+      "Telecom": {
+        "auroc": 0.6188197767145135,
+        "auprc": 0.4361899620643688,
+        "n_samples": 137,
+        "n_positive": 38
+      },
+      "Utilities": {
+        "auroc": 0.6999527732591699,
+        "auprc": 0.45345015446899795,
+        "n_samples": 382,
+        "n_positive": 59
+      },
+      "Shops": {
+        "auroc": 0.6749361207897793,
+        "auprc": 0.3997190438469838,
+        "n_samples": 724,
+        "n_positive": 150
+      },
+      "Health Care": {
+        "auroc": 0.6186853440840606,
+        "auprc": 0.30230033698779313,
+        "n_samples": 2966,
+        "n_positive": 724
+      },
+      "Finance": {
+        "auroc": 0.6624645672187596,
+        "auprc": 0.3450549915796729,
+        "n_samples": 3413,
+        "n_positive": 599
+      },
+      "Other": {
+        "auroc": 0.6856887413130137,
+        "auprc": 0.3823575436573056,
+        "n_samples": 2246,
+        "n_positive": 528
+      }
+    },
+    "xgboost": {
+      "Consumer NonDurables": {
+        "auroc": 0.6327766299357208,
+        "auprc": 0.2960972237875076,
+        "n_samples": 451,
+        "n_positive": 99
+      },
+      "Consumer Durables": {
+        "auroc": 0.6973449894770924,
+        "auprc": 0.41026840146191895,
+        "n_samples": 271,
+        "n_positive": 58
+      },
+      "Manufacturing": {
+        "auroc": 0.7209055378080774,
+        "auprc": 0.3273647185312548,
+        "n_samples": 955,
+        "n_positive": 137
+      },
+      "Energy": {
+        "auroc": 0.6369931636020745,
+        "auprc": 0.421684607000888,
+        "n_samples": 415,
+        "n_positive": 112
+      },
+      "Chemicals": {
+        "auroc": 0.6647743201569948,
+        "auprc": 0.30918375555759225,
+        "n_samples": 304,
+        "n_positive": 58
+      },
+      "Business Equipment": {
+        "auroc": 0.6281012701331428,
+        "auprc": 0.284232048492292,
+        "n_samples": 1896,
+        "n_positive": 390
+      },
+      "Telecom": {
+        "auroc": 0.643806485911749,
+        "auprc": 0.42926659617164137,
+        "n_samples": 137,
+        "n_positive": 38
+      },
+      "Utilities": {
+        "auroc": 0.6582882930156897,
+        "auprc": 0.26488747937595897,
+        "n_samples": 382,
+        "n_positive": 59
+      },
+      "Shops": {
+        "auroc": 0.6742276422764227,
+        "auprc": 0.3520542639981995,
+        "n_samples": 724,
+        "n_positive": 150
+      },
+      "Health Care": {
+        "auroc": 0.6131888211492305,
+        "auprc": 0.3113973355952024,
+        "n_samples": 2966,
+        "n_positive": 724
+      },
+      "Finance": {
+        "auroc": 0.6339907901465721,
+        "auprc": 0.2795557703264391,
+        "n_samples": 3413,
+        "n_positive": 599
+      },
+      "Other": {
+        "auroc": 0.6261575298973436,
+        "auprc": 0.3139879910069364,
+        "n_samples": 2246,
+        "n_positive": 528
+      }
+    }
+  },
+  "sec_enforcement": {
+    "ft_transformer": {
+      "Consumer NonDurables": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 451,
+        "n_positive": 0
+      },
+      "Consumer Durables": {
+        "auroc": 0.1518518518518519,
+        "auprc": 0.004347826086956522,
+        "n_samples": 271,
+        "n_positive": 1
+      },
+      "Manufacturing": {
+        "auroc": 0.5583421330517423,
+        "auprc": 0.013877660856676556,
+        "n_samples": 955,
+        "n_positive": 8
+      },
+      "Energy": {
+        "auroc": 0.08937198067632846,
+        "auprc": 0.0026455026455026454,
+        "n_samples": 415,
+        "n_positive": 1
+      },
+      "Chemicals": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 304,
+        "n_positive": 0
+      },
+      "Business Equipment": {
+        "auroc": 0.3207826546800635,
+        "auprc": 0.0022023462086188353,
+        "n_samples": 1896,
+        "n_positive": 5
+      },
+      "Telecom": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 137,
+        "n_positive": 0
+      },
+      "Utilities": {
+        "auroc": 0.30183727034120733,
+        "auprc": 0.003745318352059925,
+        "n_samples": 382,
+        "n_positive": 1
+      },
+      "Shops": {
+        "auroc": 0.5090529247910863,
+        "auprc": 0.009363842369613417,
+        "n_samples": 724,
+        "n_positive": 6
+      },
+      "Health Care": {
+        "auroc": 0.5190137666440984,
+        "auprc": 0.007533496017758484,
+        "n_samples": 2966,
+        "n_positive": 12
+      },
+      "Finance": {
+        "auroc": 0.2740754925741521,
+        "auprc": 0.010844733861524191,
+        "n_samples": 3413,
+        "n_positive": 56
+      },
+      "Other": {
+        "auroc": 0.4357886904761905,
+        "auprc": 0.0034796054511983263,
+        "n_samples": 2246,
+        "n_positive": 6
+      }
+    },
+    "xgboost": {
+      "Consumer NonDurables": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 451,
+        "n_positive": 0
+      },
+      "Consumer Durables": {
+        "auroc": 0.8666666666666667,
+        "auprc": 0.02702702702702703,
+        "n_samples": 271,
+        "n_positive": 1
+      },
+      "Manufacturing": {
+        "auroc": 0.4887803590285111,
+        "auprc": 0.010569556146490461,
+        "n_samples": 955,
+        "n_positive": 8
+      },
+      "Energy": {
+        "auroc": 0.6666666666666667,
+        "auprc": 0.007194244604316547,
+        "n_samples": 415,
+        "n_positive": 1
+      },
+      "Chemicals": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 304,
+        "n_positive": 0
+      },
+      "Business Equipment": {
+        "auroc": 0.5326282390269699,
+        "auprc": 0.005038497962595249,
+        "n_samples": 1896,
+        "n_positive": 5
+      },
+      "Telecom": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 137,
+        "n_positive": 0
+      },
+      "Utilities": {
+        "auroc": 0.5879265091863517,
+        "auprc": 0.006329113924050633,
+        "n_samples": 382,
+        "n_positive": 1
+      },
+      "Shops": {
+        "auroc": 0.6146703806870938,
+        "auprc": 0.016548903823142468,
+        "n_samples": 724,
+        "n_positive": 6
+      },
+      "Health Care": {
+        "auroc": 0.4975739110810201,
+        "auprc": 0.004733964346568392,
+        "n_samples": 2966,
+        "n_positive": 12
+      },
+      "Finance": {
+        "auroc": 0.4584131239627218,
+        "auprc": 0.01855369530243542,
+        "n_samples": 3413,
+        "n_positive": 56
+      },
+      "Other": {
+        "auroc": 0.7954613095238096,
+        "auprc": 0.02697425373641213,
+        "n_samples": 2246,
+        "n_positive": 6
+      }
+    }
+  },
+  "bankruptcy": {
+    "ft_transformer": {
+      "Consumer NonDurables": {
+        "auroc": 0.36465324384787473,
+        "auprc": 0.008459061194255298,
+        "n_samples": 451,
+        "n_positive": 4
+      },
+      "Consumer Durables": {
+        "auroc": 0.4157894736842105,
+        "auprc": 0.017975457641603784,
+        "n_samples": 271,
+        "n_positive": 5
+      },
+      "Manufacturing": {
+        "auroc": 0.6723044397463002,
+        "auprc": 0.0186264866911705,
+        "n_samples": 955,
+        "n_positive": 9
+      },
+      "Energy": {
+        "auroc": 0.529030765671987,
+        "auprc": 0.058407751750999194,
+        "n_samples": 415,
+        "n_positive": 22
+      },
+      "Chemicals": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 304,
+        "n_positive": 0
+      },
+      "Business Equipment": {
+        "auroc": 0.7863474815147677,
+        "auprc": 0.022167979426315397,
+        "n_samples": 1896,
+        "n_positive": 13
+      },
+      "Telecom": {
+        "auroc": 0.5298507462686567,
+        "auprc": 0.02951466366947103,
+        "n_samples": 137,
+        "n_positive": 3
+      },
+      "Utilities": {
+        "auroc": 0.6705570291777189,
+        "auprc": 0.0259725323522138,
+        "n_samples": 382,
+        "n_positive": 5
+      },
+      "Shops": {
+        "auroc": 0.5891364902506964,
+        "auprc": 0.025898466819297833,
+        "n_samples": 724,
+        "n_positive": 6
+      },
+      "Health Care": {
+        "auroc": 0.8023132017034457,
+        "auprc": 0.018164446779778888,
+        "n_samples": 2966,
+        "n_positive": 14
+      },
+      "Finance": {
+        "auroc": 0.5592802472770091,
+        "auprc": 0.00971630776241763,
+        "n_samples": 3413,
+        "n_positive": 16
+      },
+      "Other": {
+        "auroc": 0.5594730941704036,
+        "auprc": 0.017594934393640176,
+        "n_samples": 2246,
+        "n_positive": 16
+      }
+    },
+    "xgboost": {
+      "Consumer NonDurables": {
+        "auroc": 0.28187919463087246,
+        "auprc": 0.008889809133182828,
+        "n_samples": 451,
+        "n_positive": 4
+      },
+      "Consumer Durables": {
+        "auroc": 0.49248120300751885,
+        "auprc": 0.024543927487899155,
+        "n_samples": 271,
+        "n_positive": 5
+      },
+      "Manufacturing": {
+        "auroc": 0.7188160676532769,
+        "auprc": 0.01981652063258243,
+        "n_samples": 955,
+        "n_positive": 9
+      },
+      "Energy": {
+        "auroc": 0.5903307888040713,
+        "auprc": 0.07951678613523352,
+        "n_samples": 415,
+        "n_positive": 22
+      },
+      "Chemicals": {
+        "auroc": NaN,
+        "auprc": NaN,
+        "n_samples": 304,
+        "n_positive": 0
+      },
+      "Business Equipment": {
+        "auroc": 0.6675109277339761,
+        "auprc": 0.023376112746469967,
+        "n_samples": 1896,
+        "n_positive": 13
+      },
+      "Telecom": {
+        "auroc": 0.6044776119402985,
+        "auprc": 0.04068111455108359,
+        "n_samples": 137,
+        "n_positive": 3
+      },
+      "Utilities": {
+        "auroc": 0.4026525198938993,
+        "auprc": 0.018600531288703332,
+        "n_samples": 382,
+        "n_positive": 5
+      },
+      "Shops": {
+        "auroc": 0.5680129990714948,
+        "auprc": 0.013527276653889371,
+        "n_samples": 724,
+        "n_positive": 6
+      },
+      "Health Care": {
+        "auroc": 0.7818912117692606,
+        "auprc": 0.06026466123166712,
+        "n_samples": 2966,
+        "n_positive": 14
+      },
+      "Finance": {
+        "auroc": 0.4941308507506624,
+        "auprc": 0.005072984519754527,
+        "n_samples": 3413,
+        "n_positive": 16
+      },
+      "Other": {
+        "auroc": 0.5596412556053811,
+        "auprc": 0.023576527675977725,
+        "n_samples": 2246,
+        "n_positive": 16
+      }
+    }
+  }
+}
