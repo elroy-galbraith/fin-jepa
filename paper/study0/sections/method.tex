@@ -25,7 +25,7 @@ We compare the FT-Transformer against three baseline models spanning classical a
 
 \paragraph{XGBoost.} Extreme gradient-boosted trees \citep{chen2016xgboost} with 500 estimators, learning rate 0.05, max depth~6, subsample ratio 0.8, column subsample ratio 0.8. Evaluation metric: AUC.
 
-\paragraph{Histogram Gradient-Boosted Trees (GBT).} Scikit-learn's \texttt{HistGradientBoostingClassifier} with 500 iterations, learning rate 0.05, max depth~6, minimum 20 samples per leaf, balanced class weighting. This model natively handles NaN values, making it suitable for evaluation on raw XBRL features with minimal preprocessing.
+\paragraph{Histogram Gradient-Boosted Trees (GBT).} Scikit-learn's \texttt{HistGradientBoosting\-Class\-i\-fier} with 500 iterations, learning rate 0.05, max depth~6, minimum 20 samples per leaf, balanced class weighting. This model natively handles NaN values, making it suitable for evaluation on raw XBRL features with minimal preprocessing.
 
 All baseline hyperparameters use default (untuned) values for the initial benchmark (\Cref{tab:auroc}). Optuna-based temporal cross-validation tuning (30 trials, 3-fold expanding-window CV) is enabled for the like-for-like tuned comparison (\Cref{sec:results_tuned}).
 
