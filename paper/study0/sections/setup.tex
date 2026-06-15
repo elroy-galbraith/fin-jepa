@@ -28,7 +28,7 @@ All feature normalization statistics (medians, percentile bounds, quantile mappi
 
 Split sizes: 13{,}920 train / 5{,}657 validation / 14{,}160 test observations.
 
-As a robustness check, we also define a walk-forward evaluation scheme using expanding training windows. Starting with a train cutoff of 2014-12-31, each successive fold advances by one year, with a 1-year validation window and a 2-year test window, up to a final test boundary of 2023-12-31. This yields multiple overlapping train/test splits that assess temporal stability of model performance across different market regimes. In practice, the walk-forward evaluation was not completed: early time splits produced empty training partitions for some outcomes, causing the preprocessing pipeline to fail. The underlying bug has been fixed but the evaluation was not re-run for this study; walk-forward results are deferred to future work.
+As a robustness check, we also define a walk-forward evaluation scheme using expanding training windows. Starting with a train cutoff of 2014-12-31, each successive fold advances by one year, with a 1-year validation window and a 2-year test window, up to a final test boundary of 2023-12-31. This yields seven overlapping train/test splits (test windows from 2016--2017 through 2022--2023) that assess temporal stability of model performance across different market regimes, including the COVID-19 boundary. Each fold fits its feature normalization statistics and coverage-pruning decisions on that fold's training split only, so no future information leaks into the preprocessing for any fold. Walk-forward results are reported in \Cref{sec:results_walkforward}.
 
 \subsection{Evaluation Metrics}
 \label{sec:metrics}

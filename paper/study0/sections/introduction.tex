@@ -1,4 +1,4 @@
-\section{Introduction}
+ \section{Introduction}
 \label{sec:introduction}
 
 Deep learning has achieved strong results across many domains, yet its adoption for tabular financial data remains limited. Tree-based ensembles---particularly XGBoost \citep{chen2016xgboost} and gradient-boosted trees---continue to dominate applied financial modeling, and recent comprehensive benchmarks confirm that they remain competitive with or superior to deep learning on many tabular tasks \citep{grinsztajn2022tree,shwartzziv2022tabular}. This presents a problem for research programs that aim to build multimodal financial architectures: if the base encoder for structured financial data cannot match conventional baselines, downstream gains from cross-modal integration are difficult to attribute.
@@ -15,11 +15,13 @@ This paper makes the following contributions:
 
   \item We benchmark the FT-Transformer---with hyperparameters selected via a 36-configuration grid search---against logistic regression (with both traditional ratios and full feature sets), XGBoost, and a histogram-based gradient-boosted tree on distress prediction, using a strictly temporal evaluation protocol that prevents look-ahead bias.
 
-  \item We provide a rigorous comparison against Optuna-tuned XGBoost and gradient-boosted trees (30 trials per model, 3-fold expanding-window temporal CV), alongside default-hyperparameter baselines, and report multi-seed variance (3 seeds) for the FT-Transformer.
+  \item We provide a rigorous like-for-like tuned comparison in which both the baselines and the FT-Transformer are Optuna-tuned (30 trials per model, 3-fold expanding-window temporal CV), alongside default-hyperparameter baselines, and report multi-seed variance (3 seeds) for the FT-Transformer.
+
+  \item We assess the temporal stability of the FT-Transformer advantage with expanding-window walk-forward validation spanning the COVID-19 boundary (seven folds, test windows 2016--2017 through 2022--2023).
 
   \item We evaluate masked feature reconstruction as a self-supervised pretraining objective for the FT-Transformer and measure its effect on downstream classification performance.
 
   \item We release the complete data extraction pipeline, feature engineering code, model implementations, and evaluation scripts as open-source software to support reproducibility and further research.
 \end{enumerate}
 
-This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. Against default-hyperparameter XGBoost, the tuned FT-Transformer is directionally positive on all four distress outcomes (statistically significant on two of four). Against Optuna-tuned baselines, the strict AUROC gate is not met (2/4 wins); however, the FT-Transformer's calibration properties, its suitability as a pretrained representation backbone, and the gains from self-supervised pretraining support proceeding with it as the structured financial modality encoder in subsequent studies.
+This work constitutes Study~0 of the Fin-JEPA research program, a gated sequence of studies that progressively builds toward a cross-modal joint-embedding predictive architecture for financial risk signals \citep{assran2023self}. Giving both sides an equal Optuna tuning budget on the same temporal cross-validation, the FT-Transformer meets the strict AUROC gate (3/4 wins); against default-hyperparameter XGBoost the margin is wider still (directionally positive on all four outcomes, significant on two). Walk-forward validation shows the advantage is temporally stable on the highest-signal outcome (earnings restatement, all seven folds) and largely robust on bankruptcy (six of seven), with the rare SEC-enforcement outcome the least reliable. Together with its calibration properties, its suitability as a pretrained representation backbone, and the gains from self-supervised pretraining, this supports adopting it as the structured financial modality encoder in subsequent studies.

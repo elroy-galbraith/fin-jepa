@@ -6,7 +6,7 @@ All results below are on the held-out test set (fiscal period end $>$ 2019-12-31
 \subsection{Baseline Comparison}
 \label{sec:results_baseline}
 
-\Cref{fig:sweep_heatmap} shows the mean test AUROC across all evaluable outcomes for each configuration in the FT-Transformer hyperparameter sweep. \Cref{tab:auroc} reports test AUROC for all models across the four outcomes. The FT-Transformer column reports the best configuration from the sweep, trained from scratch; SSL-pretrained variants are presented separately in \Cref{sec:results_ssl}.
+We first report an initial benchmark against \emph{default}-hyperparameter baselines; the decisive comparison, in which the baselines are also Optuna-tuned to equalize the tuning budget, follows in \Cref{sec:results_tuned} and underpins the gate decision (\Cref{sec:results_gate}). \Cref{fig:sweep_heatmap} shows the mean test AUROC across all evaluable outcomes for each configuration in the FT-Transformer hyperparameter sweep. \Cref{tab:auroc} reports test AUROC for all models across the four outcomes. The FT-Transformer column reports the best configuration from the sweep, trained from scratch; SSL-pretrained variants are presented separately in \Cref{sec:results_ssl}.
 
 \begin{figure}[ht]
   \centering
@@ -73,32 +73,32 @@ The tuned FT-Transformer matches or exceeds the best baseline on \texttt{sec\_en
 \subsubsection{Optuna-Tuned Baselines}
 \label{sec:results_tuned}
 
-To address the tuning gap between the grid-searched FT-Transformer and default-hyperparameter baselines, we re-ran the benchmark with Optuna-tuned XGBoost and GBT (30 trials each, 3-fold expanding-window temporal CV). This tuned-baseline benchmark uses an independent preprocessing pipeline (separate QuantileTransformer fit on the training split), so absolute AUROC values are not directly comparable to \Cref{tab:auroc}; relative comparisons within this benchmark are valid.
+To eliminate the asymmetric tuning budget between the FT-Transformer and the baselines, we re-ran the benchmark with all models Optuna-tuned on the same protocol: XGBoost, GBT, and the FT-Transformer each receive 30 trials selected by 3-fold expanding-window temporal cross-validation. All models share a single preprocessing pipeline (one QuantileTransformer fit on the training split), so AUROC values are directly comparable across models within \Cref{tab:auroc_tuned}.
 
 \begin{table}[ht]
   \centering
-  \caption{Test AUROC with Optuna-tuned baselines (30 trials per model). Best per outcome in \textbf{bold}.}
+  \caption{Test AUROC with all models Optuna-tuned (30 trials each, 3-fold expanding-window CV). Best per outcome in \textbf{bold}.}
   \label{tab:auroc_tuned}
   \small
   \begin{tabular}{@{}lcccc@{}}
     \toprule
     Model & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
     \midrule
-    LR (traditional ratios) & 0.644 & 0.620 & 0.607 & 0.646 \\
-    LR (full features) & \textbf{0.682} & 0.660 & 0.399 & 0.654 \\
-    XGBoost (tuned) & 0.668 & 0.631 & 0.501 & 0.613 \\
-    GBT (tuned) & 0.668 & \textbf{0.672} & \textbf{0.644} & 0.564 \\
-    FT-Transformer & 0.663 & 0.680 & 0.427 & \textbf{0.663} \\
+    LR (traditional ratios) & 0.644 & 0.608 & \textbf{0.630} & 0.646 \\
+    LR (full features) & \textbf{0.683} & 0.642 & 0.391 & 0.654 \\
+    XGBoost (tuned) & 0.668 & 0.645 & 0.513 & 0.617 \\
+    GBT (tuned) & 0.682 & 0.649 & 0.595 & 0.540 \\
+    FT-Transformer (tuned) & 0.677 & \textbf{0.682} & 0.529 & \textbf{0.658} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-With tuned baselines, the picture changes. Tuned XGBoost closes the gap on \texttt{stock\_decline} (0.668 vs.\ FT's 0.663) and substantially exceeds the FT-Transformer on \texttt{sec\_enforcement} (0.501 vs.\ 0.427). Tuned GBT becomes the strongest model on \texttt{sec\_enforcement} (0.644). The FT-Transformer retains clear wins on \texttt{earnings\_restate} ($+0.049$ vs.\ tuned XGBoost) and \texttt{bankruptcy} ($+0.050$). Evaluated against the go/no-go gate criterion (\Cref{sec:gate}), the FT-Transformer achieves 2/4 wins over tuned XGBoost---below the 3/4 threshold.
+With all models tuned on the same protocol, the FT-Transformer wins three of the four outcomes against tuned XGBoost. It leads clearly on \texttt{earnings\_restate} ($+0.037$) and \texttt{bankruptcy} ($+0.041$), and edges tuned XGBoost on \texttt{sec\_enforcement} ($+0.016$)---though both remain near chance there, and the traditional-ratio logistic regression (0.630) is the strongest model on that low-base-rate outcome. On \texttt{stock\_decline} the FT-Transformer is fractionally ahead of tuned XGBoost ($+0.009$, below the 0.01 margin) and trails LR-full (0.683). Evaluated against the go/no-go gate criterion (\Cref{sec:gate}), the FT-Transformer achieves 3/4 wins over tuned XGBoost---meeting the threshold.
 
 \subsection{Self-Supervised Pretraining}
 \label{sec:results_ssl}
 
-\Cref{tab:ssl} reports test AUROC for the tuned FT-Transformer initialized from scratch versus three SSL mask ratios. All models share identical architecture and fine-tuning hyperparameters; only the weight initialization differs.
+\Cref{tab:ssl} reports test AUROC for the tuned FT-Transformer initialized from scratch versus three SSL mask ratios. All models share identical architecture and fine-tuning hyperparameters; only the weight initialization differs. The SSL study uses the sweep architecture ($d = 192$); because it is a scratch-versus-pretrained comparison at a fixed architecture, it is self-contained and was not re-run on the Optuna-tuned architecture ($d = 128$) used for the gate and multi-seed analyses.
 
 \begin{table}[ht]
   \centering
@@ -137,33 +137,56 @@ To quantify initialization variance, we train the tuned FT-Transformer from scra
 
 \begin{table}[ht]
   \centering
-  \caption{Multi-seed test AUROC for the tuned FT-Transformer (from scratch). Mean $\pm$ std across 3 seeds.}
+  \caption{Multi-seed test AUROC for the tuned FT-Transformer (from scratch, Optuna-tuned architecture). Mean $\pm$ std across 3 seeds.}
   \label{tab:multiseed}
   \small
   \begin{tabular}{@{}lcccc@{}}
     \toprule
     Outcome & Seed 42 & Seed 123 & Seed 456 & Mean $\pm$ Std \\
     \midrule
-    \texttt{stock\_decline} & 0.660 & 0.644 & 0.646 & $0.650 \pm 0.007$ \\
-    \texttt{earnings\_restate} & 0.680 & 0.668 & 0.674 & $0.674 \pm 0.005$ \\
-    \texttt{sec\_enforcement} & 0.544 & 0.515 & 0.534 & $0.531 \pm 0.012$ \\
-    \texttt{bankruptcy} & 0.665 & 0.643 & 0.673 & $0.660 \pm 0.013$ \\
+    \texttt{stock\_decline} & 0.677 & 0.672 & 0.667 & $0.672 \pm 0.004$ \\
+    \texttt{earnings\_restate} & 0.682 & 0.653 & 0.658 & $0.664 \pm 0.013$ \\
+    \texttt{sec\_enforcement} & 0.529 & 0.486 & 0.593 & $0.536 \pm 0.044$ \\
+    \texttt{bankruptcy} & 0.658 & 0.681 & 0.658 & $0.666 \pm 0.011$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Variance is modest for the two higher-prevalence outcomes (\texttt{stock\_decline} std $= 0.007$, \texttt{earnings\_restate} std $= 0.005$) and somewhat larger for the rare-event outcomes (\texttt{sec\_enforcement} std $= 0.012$, \texttt{bankruptcy} std $= 0.013$), consistent with the small positive-class counts producing noisier gradient signals.
+Variance is modest for three of the four outcomes (\texttt{stock\_decline} std $= 0.004$, \texttt{bankruptcy} std $= 0.011$, \texttt{earnings\_restate} std $= 0.013$) but substantial for \texttt{sec\_enforcement} (std $= 0.044$; AUROC ranges 0.486--0.593 across seeds). The high rare-event variance---driven by the small positive-class count---reinforces that the \texttt{sec\_enforcement} result is the least reliable of the four, consistent with its near-chance discrimination and its walk-forward instability (\Cref{sec:results_walkforward}).
 
 \subsection{Go/No-Go Gate}
 \label{sec:results_gate}
 
-The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 4 outcomes. We evaluate the gate under two conditions: against default-hyperparameter XGBoost (\Cref{tab:gate_default}) and against Optuna-tuned XGBoost (\Cref{tab:gate_tuned}).
+The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0.01$ AUROC on at least 3 of 4 outcomes. The decisive test is the \emph{like-for-like} comparison, in which the FT-Transformer and XGBoost receive the same Optuna tuning budget and select all hyperparameters on the same expanding-window cross-validation (\Cref{tab:gate_tuned}); we also report a comparison against default-hyperparameter XGBoost (\Cref{tab:gate_default}) as a sensitivity check on the baseline tuning budget.
 
-\subsubsection{Against Default-Hyperparameter Baselines}
+\subsubsection{Primary: Equal-Budget Tuned Comparison}
 
 \begin{table}[ht]
   \centering
-  \caption{Go/no-go gate vs.\ default-hyperparameter XGBoost. Both the from-scratch and SSL-pretrained ($r = 0.50$) FT-Transformer variants are shown.}
+  \caption{Go/no-go gate vs.\ Optuna-tuned XGBoost, with the FT-Transformer also Optuna-tuned (30 trials each, 3-fold expanding-window CV). This equal-budget comparison is the basis for the gate decision.}
+  \label{tab:gate_tuned}
+  \small
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Outcome & XGBoost (tuned) & FT-Transformer (tuned) & $\Delta$ \\
+    \midrule
+    \texttt{stock\_decline} & 0.668 & 0.677 & $+0.009$ \\
+    \texttt{earnings\_restate} & 0.645 & 0.682 & $+0.037$ \\
+    \texttt{sec\_enforcement} & 0.513 & 0.529 & $+0.016$ \\
+    \texttt{bankruptcy} & 0.617 & 0.658 & $+0.041$ \\
+    \midrule
+    Wins ($\geq 0.01$) & & & 3/4 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+With both models Optuna-tuned on identical protocols, the FT-Transformer meets the gate (3/4 wins): it beats tuned XGBoost on \texttt{earnings\_restate} ($+0.037$), \texttt{bankruptcy} ($+0.041$), and \texttt{sec\_enforcement} ($+0.016$); on \texttt{stock\_decline} it leads by $+0.009$, just below the 0.01 margin. Because this comparison equalizes the tuning budget and selects every hyperparameter on temporal cross-validation rather than on the test set, we treat it as the decisive result. The \texttt{sec\_enforcement} margin should be weighted lightly: it is a near-chance outcome on which a traditional-ratio logistic regression (0.630) is the strongest model, and the walk-forward analysis (\Cref{sec:results_walkforward}) shows it is the least temporally stable of the three wins.
+
+\subsubsection{Sensitivity: Against Default-Hyperparameter Baselines}
+
+\begin{table}[ht]
+  \centering
+  \caption{Go/no-go gate vs.\ default-hyperparameter XGBoost (sensitivity check). Both the from-scratch and SSL-pretrained ($r = 0.50$) FT-Transformer variants are shown.}
   \label{tab:gate_default}
   \small
   \begin{tabular}{@{}lccccc@{}}
@@ -180,30 +203,7 @@ The formal gate criterion requires the FT-Transformer to beat XGBoost by $\geq 0
   \end{tabular}
 \end{table}
 
-Against default-hyperparameter XGBoost, the FT-Transformer is directionally positive on all four outcomes (4/4 exceed the 0.01 margin). The largest deltas are on \texttt{sec\_enforcement} ($+0.075$ scratch, $+0.071$ SSL) and \texttt{bankruptcy} ($+0.034$ scratch, $+0.057$ SSL).
-
-\subsubsection{Against Optuna-Tuned Baselines}
-
-\begin{table}[ht]
-  \centering
-  \caption{Go/no-go gate vs.\ Optuna-tuned XGBoost (30 trials, 3-fold temporal CV).}
-  \label{tab:gate_tuned}
-  \small
-  \begin{tabular}{@{}lccc@{}}
-    \toprule
-    Outcome & XGBoost (tuned) & FT-Transformer & $\Delta$ \\
-    \midrule
-    \texttt{stock\_decline} & 0.668 & 0.663 & $-0.005$ \\
-    \texttt{earnings\_restate} & 0.631 & 0.680 & $+0.049$ \\
-    \texttt{sec\_enforcement} & 0.501 & 0.427 & $-0.075$ \\
-    \texttt{bankruptcy} & 0.613 & 0.663 & $+0.050$ \\
-    \midrule
-    Wins ($\geq 0.01$) & & & 2/4 \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\textbf{Gate result.} Against default baselines, the gate criterion is met (4/4 directionally positive, 2/4 statistically significant at $p < 0.05$; see bootstrap analysis below). Against Optuna-tuned baselines, the AUROC gate is \emph{not} met (2/4 wins). Tuned XGBoost closes the gap on \texttt{stock\_decline} and substantially exceeds the FT-Transformer on \texttt{sec\_enforcement}, the lowest-base-rate outcome. The FT-Transformer retains clear wins on \texttt{earnings\_restate} and \texttt{bankruptcy}.
+Against default-hyperparameter XGBoost the margin is wider---the FT-Transformer exceeds the 0.01 margin on all four outcomes (4/4), with the largest deltas on \texttt{sec\_enforcement} ($+0.075$ scratch) and \texttt{bankruptcy} ($+0.057$ SSL), and the advantage is statistically significant on two of four (\Cref{tab:bootstrap}). We report this for completeness but do not rely on it: pitting a tuned deep model against untuned tree baselines overstates the advantage, so the equal-budget comparison above is the appropriate basis for the gate decision.
 
 \Cref{fig:final_benchmark} shows test AUROC for all six models (default baselines) across the four outcomes, and \Cref{fig:bootstrap_ci} presents paired bootstrap 95\% confidence intervals on the AUROC difference (FT minus default XGBoost).
 
@@ -242,4 +242,35 @@ Against default-hyperparameter XGBoost, the FT-Transformer is directionally posi
   \end{tabular}
 \end{table}
 
-\paragraph{Calibration as supplementary evidence.} While the AUROC gate is mixed, calibration provides additional evidence for the FT-Transformer. On \texttt{stock\_decline}---the highest-prevalence outcome and the most reliable benchmark---the FT-Transformer achieves substantially better calibration (ECE 0.042 vs.\ 0.147 for tuned XGBoost). On the low-base-rate outcomes (\texttt{sec\_enforcement}, \texttt{bankruptcy}), XGBoost achieves very low ECE (0.007) by predicting near-zero probabilities for virtually all samples---technically well-calibrated but uninformative for risk stratification. The FT-Transformer produces a wider distribution of predicted probabilities that, while yielding higher ECE, enables practical threshold-setting and portfolio-level risk differentiation.
+\paragraph{Calibration as supplementary evidence.} Beyond discrimination, calibration provides additional evidence for the FT-Transformer. On \texttt{stock\_decline}---the highest-prevalence outcome and the most reliable benchmark---the FT-Transformer achieves substantially better calibration (ECE 0.038 vs.\ 0.152 for tuned XGBoost). On the low-base-rate outcomes (\texttt{sec\_enforcement}, \texttt{bankruptcy}), XGBoost achieves very low ECE (0.007 on \texttt{sec\_enforcement}) by predicting near-zero probabilities for virtually all samples---technically well-calibrated but uninformative for risk stratification. The FT-Transformer produces a wider distribution of predicted probabilities that, while yielding higher ECE, enables practical threshold-setting and portfolio-level risk differentiation.
+
+\subsection{Walk-Forward Validation}
+\label{sec:results_walkforward}
+
+To test whether the FT-Transformer's advantage is an artifact of the single 2020--2023 test window---which spans the COVID-19 disruption---we evaluate seven expanding-window walk-forward folds (test windows 2016--2017 through 2022--2023; \Cref{sec:splits}). Each fold retrains the tuned FT-Transformer and tuned XGBoost on all data up to the fold's cutoff and evaluates on the held-out window. \Cref{fig:walkforward} plots the per-fold AUROC difference (FT-Transformer minus XGBoost) for each outcome, and \Cref{tab:walkforward} summarizes win counts and the mean difference.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{../../results/study0/figures/walk_forward_delta.png}
+  \caption{Walk-forward AUROC difference (FT-Transformer minus XGBoost) across the seven expanding-window folds. The shaded band marks the two COVID-era test windows; the dotted line is the 0.01 gate margin. The \texttt{earnings\_restate} advantage is flat and consistently above the margin; \texttt{bankruptcy} is large but dips below zero only at 2020--2021; and the rare-event \texttt{sec\_enforcement} margin is volatile, decaying over time.}
+  \label{fig:walkforward}
+\end{figure}
+
+\begin{table}[ht]
+  \centering
+  \caption{Walk-forward validation: FT-Transformer vs.\ XGBoost across seven expanding-window folds, each with its preprocessing fit on that fold's training split only. ``COVID folds'' are the two folds whose test windows include 2020 (test 2019--2020 and 2020--2021).}
+  \label{tab:walkforward}
+  \small
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    Outcome & FT wins & Mean $\Delta$ & Range of $\Delta$ & COVID folds \\
+    \midrule
+    \texttt{earnings\_restate} & 7/7 & $+0.014$ & $[+0.004,\,+0.024]$ & FT wins both \\
+    \texttt{bankruptcy} & 6/7 & $+0.037$ & $[-0.025,\,+0.074]$ & 1 of 2 (loses 2020--21) \\
+    \texttt{stock\_decline} & 5/7 & $+0.013$ & $[-0.005,\,+0.040]$ & 1 of 2 \\
+    \texttt{sec\_enforcement} & 4/7 & $+0.024$ & $[-0.031,\,+0.110]$ & 1 of 2 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The walk-forward analysis sharpens the gate result into an outcome-specific picture. \texttt{earnings\_restate} is the one robustly stable advantage: the FT-Transformer wins all seven folds with a tight margin band and no degradation across the COVID boundary. \texttt{bankruptcy} is strong overall ($+0.037$ mean, 6/7 folds); its only loss is the 2020--2021 window, so the advantage is largely robust but narrows through the depth of the COVID disruption. \texttt{stock\_decline} is marginal ($+0.013$ mean, 5/7), hovering near the gate margin throughout. \texttt{sec\_enforcement} is the least reliable: its 4/7 win rate and wide range ($[-0.031, +0.110]$) are dominated by the early folds, and it slips negative in the most recent windows---consistent with its near-chance discrimination and high seed variance (\Cref{sec:results_multiseed}) on this extremely low-base-rate outcome. In short, the fixed-split gate is corroborated strongly for \texttt{earnings\_restate}, well for \texttt{bankruptcy}, and only weakly for the rare-event \texttt{sec\_enforcement}.
