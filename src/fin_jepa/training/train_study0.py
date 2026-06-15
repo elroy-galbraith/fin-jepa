@@ -30,7 +30,11 @@ from fin_jepa.data.feature_engineering import (
     build_feature_matrix,
 )
 from fin_jepa.data.labels import load_label_database
-from fin_jepa.data.splits import RollingSplitConfig, SplitConfig, make_rolling_splits
+from fin_jepa.data.splits import (
+    RollingSplitConfig,
+    SplitConfig,
+    make_rolling_split_configs,
+)
 from fin_jepa.data.xbrl_loader import load_xbrl_features
 from fin_jepa.models.baselines import (
     build_gbt,
@@ -1124,32 +1128,12 @@ def run_walk_forward(
     if universe_path.exists() and feat_cfg.use_sic:
         universe_df = pd.read_parquet(universe_path)
 
-    # Fit normalisation on data up to the main benchmark's train_end.
-    # Using first_train_end alone can produce an empty training split if
-    # the dataset starts after that date; the standard train_end (2017)
-    # gives the scaler enough data while still avoiding future leakage
-    # (all walk-forward test folds start after 2017).
-    scaler_train_end = _cfg(config, "data.split.train_end", "2017-12-31")
-    norm_split_cfg = SplitConfig(
-        train_end=scaler_train_end,
-        val_end=scaler_train_end,   # empty val — just to anchor scaler
-        test_end=rolling_cfg.last_test_end,
-    )
-    _splits_norm, _scaler, feature_cols, categorical_cols = build_feature_matrix(
-        merged, norm_split_cfg, feat_cfg, universe_df=universe_df,
-    )
-    n_cat = len(categorical_cols)
-    cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
-
-    # Reconstruct a single normalised dataframe covering all dates
-    full_normalized = (
-        pd.concat([_splits_norm["train"], _splits_norm["val"], _splits_norm["test"]])
-        .sort_values("period_end")
-        .reset_index(drop=True)
-    )
-
-    rolling_folds = make_rolling_splits(full_normalized, rolling_cfg)
-    log.info("Walk-forward: %d folds generated", len(rolling_folds))
+    # Generate one split config per fold.  Each fold's feature matrix
+    # (normalisation + coverage pruning) is fit on that fold's training split
+    # only, inside the loop below — so no future information leaks into the
+    # scaler for the early folds (PR #31 review).
+    fold_configs = make_rolling_split_configs(rolling_cfg)
+    log.info("Walk-forward: %d folds", len(fold_configs))
 
     outcomes = _cfg(config, "outcomes", [
         "stock_decline", "earnings_restate", "audit_qualification",
@@ -1221,16 +1205,23 @@ def run_walk_forward(
 
     fold_results: list[dict] = []
 
-    for fold_idx, fold in enumerate(rolling_folds):
+    for fold_idx, fold_split_cfg in enumerate(fold_configs):
         # Resume: skip already-completed folds
         if fold_idx in completed_folds:
             fold_results.append(completed_folds[fold_idx])
             log.info("Fold %d: restored from checkpoint", fold_idx)
             continue
 
-        train_fold = fold["train"]
-        val_fold = fold["val"]
-        test_fold = fold["test"]
+        # Fit features + scaler on THIS fold's training split only (leak-free).
+        fold_splits, _scaler, feature_cols, categorical_cols = build_feature_matrix(
+            merged, fold_split_cfg, feat_cfg, universe_df=universe_df,
+        )
+        n_cat = len(categorical_cols)
+        cat_cards = [N_SECTORS] * n_cat if n_cat > 0 else None
+
+        train_fold = fold_splits["train"]
+        val_fold = fold_splits["val"]
+        test_fold = fold_splits["test"]
 
         if len(train_fold) == 0 or len(test_fold) == 0:
             continue
@@ -1238,8 +1229,8 @@ def run_walk_forward(
         train_dates = pd.to_datetime(train_fold["period_end"])
         test_dates = pd.to_datetime(test_fold["period_end"])
         fold_label = (
-            f"train≤{train_dates.max().year}"
-            f" → test {test_dates.min().year}–{test_dates.max().year}"
+            f"train<={train_dates.max().year}"
+            f" -> test {test_dates.min().year}-{test_dates.max().year}"
         )
         log.info("Fold %d: %s", fold_idx, fold_label)
 
