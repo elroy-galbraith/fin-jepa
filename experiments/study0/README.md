@@ -2,6 +2,10 @@
 
 Notebooks for running the full Study 0 pipeline on Google Colab.
 
+> **These notebooks are archived** under `notebooks_archive/` and kept for
+> provenance. The canonical, script-based way to reproduce the paper is
+> documented in [`REPRODUCE.md`](../../REPRODUCE.md).
+
 ## Prerequisites
 
 - A Colab runtime with GPU (A100 recommended, T4 works but slower)
