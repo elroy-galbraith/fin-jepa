@@ -42,7 +42,10 @@ MODELS = [
 
 
 def _auroc(d: dict, model: str, oc: str):
-    v = d.get(model, {}).get(oc)
+    model_data = d.get(model)
+    if not isinstance(model_data, dict):
+        return None
+    v = model_data.get(oc)
     return v.get("auroc") if isinstance(v, dict) else None
 
 
