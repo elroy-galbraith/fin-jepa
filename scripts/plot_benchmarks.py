@@ -54,7 +54,8 @@ def _grouped_auroc(d: dict, models: list[tuple[str, str]], out: Path, title: str
     w = 0.8 / len(models)
     fig, ax = plt.subplots(figsize=(8.5, 4.4))
     for i, (key, label) in enumerate(models):
-        vals = [(_auroc(d, key, oc) or np.nan) for oc in OUTCOMES]
+        raw_vals = [_auroc(d, key, oc) for oc in OUTCOMES]
+        vals = [v if v is not None else np.nan for v in raw_vals]
         ax.bar(x + i * w - 0.4 + w / 2, vals, w, label=label)
     ax.axhline(0.5, color="0.6", lw=0.9, ls=":")
     ax.set_xticks(x)
