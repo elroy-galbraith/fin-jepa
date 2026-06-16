@@ -57,10 +57,19 @@ python scripts/plot_walk_forward.py   # -> walk_forward_delta.png
 python scripts/plot_benchmarks.py     # -> baseline_auroc.png, final_benchmark_all_models.png, bootstrap_ci_forest_plot.png
 ```
 
-The remaining two figures are **not yet scripted** and are produced by the
-notebooks: `sweep_heatmap.png` (needs `ft_sweep_results.json`, the 36-config grid
-sweep from `02_hp_sweep.ipynb`) and `ssl_loss_curves.png` (SSL pretraining loss
-history from `03_ssl_pretraining.ipynb`).
+All six paper figures are committed under `results/study0/figures/`, so the LaTeX
+builds from a fresh clone. Two of them are **not yet scripted** and were produced by
+the (now archived) notebooks: `sweep_heatmap.png` (needs `ft_sweep_results.json`,
+the 36-config grid sweep from `notebooks_archive/02_hp_sweep.ipynb`) and
+`ssl_loss_curves.png` (SSL pretraining loss history from
+`notebooks_archive/03_ssl_pretraining.ipynb`).
+
+## Notebooks
+
+The original exploratory notebooks live in `experiments/study0/notebooks_archive/`.
+They are kept for provenance only; the scripts above are the canonical pipeline.
+Their one unique remaining output is `ft_sweep_results.json` (grid sweep) and the
+two figures noted above.
 
 ## Artifact → paper map (summary)
 
