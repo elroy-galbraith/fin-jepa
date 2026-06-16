@@ -31,12 +31,16 @@ from pathlib import Path
 # These are estimates from the time-based test split (2020-2023).
 # Derived from calibration bin density in the stored result files.
 # ---------------------------------------------------------------------------
+# Measured on the modeling test split (period_end 2020-2023; 14,160 rows),
+# reproduced from data/raw/xbrl_features.parquet INNER JOIN
+# data/processed/label_database.parquet. These replace earlier hardcoded
+# estimates that were 4-10x too small.
 ESTIMATED_SAMPLE_SIZES: dict[str, dict[str, int]] = {
-    "stock_decline": {"n_pos": 1200, "n_neg": 1300},
-    "earnings_restate": {"n_pos": 450, "n_neg": 4050},
-    "sec_enforcement": {"n_pos": 40, "n_neg": 3960},
-    "bankruptcy": {"n_pos": 45, "n_neg": 3955},
-    "audit_qualification": {"n_pos": 0, "n_neg": 0},  # always skipped
+    "stock_decline": {"n_pos": 8334, "n_neg": 5821},
+    "earnings_restate": {"n_pos": 2952, "n_neg": 11208},
+    "sec_enforcement": {"n_pos": 96, "n_neg": 14064},
+    "bankruptcy": {"n_pos": 113, "n_neg": 14047},
+    "audit_qualification": {"n_pos": 0, "n_neg": 0},  # always skipped (no labels)
 }
 
 MODEL_LABELS: dict[str, str] = {
@@ -293,10 +297,25 @@ def main() -> None:
         default=None,
         help="Output path (default: <results-dir>/final_benchmark.json)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwriting an existing final_benchmark.json (see deprecation warning).",
+    )
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
     output_path = Path(args.output) if args.output else results_dir / "final_benchmark.json"
+
+    # DEPRECATED: this script computes analytical (Hanley-McNeil) CIs and does NOT
+    # reproduce the paper's paired-bootstrap CIs (n=1000) stored in final_benchmark.json
+    # (_meta.ci_method == "paired_bootstrap"). Refuse to clobber the real artifact.
+    if output_path.exists() and not args.force:
+        raise SystemExit(
+            f"Refusing to overwrite {output_path}: it contains the paper's paired-bootstrap\n"
+            f"results, which this (analytical) script does NOT reproduce. Pass --force only if\n"
+            f"you understand you are replacing them with inferior analytical CIs."
+        )
 
     result = generate(results_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)

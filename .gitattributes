@@ -1,0 +1,14 @@
+# Normalize line endings: store text as LF in the repository, check out native per OS.
+# This removes the CRLF/LF churn. After committing this file, run once:
+#     git add --renormalize .
+# then review and commit the (one-time) line-ending normalization separately.
+
+* text=auto
+
+# Treat binary assets as binary — never munge line endings or attempt text diffs.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.pdf      binary
+*.parquet  binary
+*.db       binary
