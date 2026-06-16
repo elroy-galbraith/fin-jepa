@@ -68,7 +68,9 @@ def _grouped_auroc(d: dict, models: list[tuple[str, str]], out: Path, title: str
 
 
 def _bootstrap_forest(d: dict, out: Path) -> None:
-    bt = d.get("bootstrap", {})
+    bt = d.get("bootstrap")
+    if not isinstance(bt, dict):
+        bt = {}
     fig, ax = plt.subplots(figsize=(7.5, 4.2))
     ys, labels = [], []
     y = 0
@@ -77,8 +79,9 @@ def _bootstrap_forest(d: dict, out: Path) -> None:
             ("scratch_vs_xgb", "scratch", "o", "#2a7"),
             ("ssl_vs_xgb", "SSL", "s", "#d90"),
         ]:
-            v = bt.get(oc, {}).get(variant)
-            if not v:
+            oc_data = bt.get(oc)
+            v = oc_data.get(variant) if isinstance(oc_data, dict) else None
+            if not isinstance(v, dict):
                 continue
             ax.plot([v["ci_low"], v["ci_high"]], [y, y], color=col, lw=2)
             ax.plot(v["mean"], y, mk, color=col, ms=7,
