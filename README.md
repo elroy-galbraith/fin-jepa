@@ -52,7 +52,10 @@ fin-jepa/
 ├── configs/                # Hydra experiment configs (YAML)
 │   └── study0/
 ├── scripts/                # Standalone pipeline runners
-│   └── run_market_pipeline.py
+│   ├── run_market_pipeline.py
+│   ├── prepare_hf_dataset.py
+│   ├── audit_earnings_restate.py
+│   └── diff_label_versions.py
 ├── notebooks/              # Exploratory analysis
 │   └── explore_market_data.ipynb
 ├── experiments/            # Notebooks and scripts for each study
@@ -185,7 +188,7 @@ build_label_database(raw_dir=Path('data/raw'))
 | Outcome | Source | Description |
 |---------|--------|-------------|
 | `stock_decline` | market_aligned.parquet | >20% market-adjusted decline within 12 months |
-| `earnings_restate` | EDGAR filing index | 10-K/A amendment proxy |
+| `earnings_restate` | EDGAR filing index + XBRL registry | Reconciled 10-K/A amendment + XBRL multi-filing detection |
 | `audit_qualification` | External CSV (optional) | Going-concern or adverse opinion |
 | `sec_enforcement` | External CSV (optional) | AAERs / litigation releases |
 | `bankruptcy` | Compustat or external CSV (optional) | Chapter 7/11 filing |
