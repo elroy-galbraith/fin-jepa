@@ -3,7 +3,7 @@
 
 Writes three figures to ``results/study0/figures/``:
   * ``baseline_auroc.png``            — test AUROC by model x outcome (5 models)
-  * ``final_benchmark_all_models.png``— test AUROC by model x outcome (6 models)
+  * ``final_benchmark_all_models.png``— test AUROC by model x outcome (5 models)
   * ``bootstrap_ci_forest_plot.png``  — paired bootstrap CIs (FT minus default XGB)
 
 These are functional regenerations of the original notebook figures (the originals
@@ -37,7 +37,6 @@ MODELS = [
     ("xgboost", "XGBoost"),
     ("gbt_raw", "GBT (raw)"),
     ("ft_scratch", "FT-Trans. (scratch)"),
-    ("ft_ssl", "FT-Trans. (SSL)"),
 ]
 
 
@@ -81,7 +80,6 @@ def _bootstrap_forest(d: dict, out: Path) -> None:
     for oc in OUTCOMES:
         for variant, lab, mk, col in [
             ("scratch_vs_xgb", "scratch", "o", "#2a7"),
-            ("ssl_vs_xgb", "SSL", "s", "#d90"),
         ]:
             oc_data = bt.get(oc)
             v = oc_data.get(variant) if isinstance(oc_data, dict) else None
@@ -114,7 +112,7 @@ def main() -> None:
     _grouped_auroc(d, MODELS[:5], FIGDIR / "baseline_auroc.png",
                    "Baseline benchmark: test AUROC by model and outcome")
     _grouped_auroc(d, MODELS, FIGDIR / "final_benchmark_all_models.png",
-                   "Final benchmark (default baselines): test AUROC, six models")
+                   "Final benchmark (default baselines): test AUROC, five models")
     _bootstrap_forest(d, FIGDIR / "bootstrap_ci_forest_plot.png")
 
 

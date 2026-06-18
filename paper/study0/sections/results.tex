@@ -33,7 +33,7 @@ We first report an initial benchmark against \emph{default}-hyperparameter basel
   \end{tabular}
 \end{table}
 
-The tuned FT-Transformer achieves the highest AUROC on \texttt{earnings\_restate} (0.685), \texttt{sec\_enforcement} (0.606, tied with LR-traditional), and \texttt{bankruptcy} (0.648). On \texttt{stock\_decline}, it trails LR-full (0.682) and GBT (0.677) but exceeds XGBoost (0.653). On \texttt{sec\_enforcement}, all models struggle---the outcome has an extremely low base rate (AUPRC $< 0.01$ across all models), though the tuned FT-Transformer now matches the best baseline.
+The tuned FT-Transformer achieves the highest AUROC on \texttt{earnings\_restate} (0.685), \texttt{sec\_enforcement} (0.606, tied with LR-traditional), and \texttt{bankruptcy} (0.648). On \texttt{stock\_decline}, it trails LR-full (0.682) and GBT (0.677) but exceeds XGBoost (0.653). On \texttt{sec\_enforcement}, all models struggle---the outcome has an extremely low base rate (AUPRC $< 0.02$ across all models), though the tuned FT-Transformer now matches the best baseline.
 
 \Cref{fig:baseline_auroc} visualises the baseline comparison across all four outcomes.
 
@@ -109,17 +109,17 @@ With all models tuned on the same protocol, the FT-Transformer wins three of the
     \toprule
     Initialization & \texttt{stock\_decline} & \texttt{earnings\_restate} & \texttt{sec\_enforcement} & \texttt{bankruptcy} \\
     \midrule
-    Scratch & 0.663 & 0.679 & 0.552 & 0.627 \\
-    SSL ($r = 0.15$) & \textbf{0.672} & 0.667 & 0.590 & \textbf{0.679} \\
-    SSL ($r = 0.30$) & 0.663 & 0.676 & 0.613 & 0.656 \\
-    SSL ($r = 0.50$) & 0.662 & \textbf{0.685} & \textbf{0.645} & 0.665 \\
+    Scratch & 0.664 & \textbf{0.671} & 0.481 & 0.668 \\
+    SSL ($r = 0.15$) & \textbf{0.672} & 0.658 & 0.554 & \textbf{0.684} \\
+    SSL ($r = 0.30$) & 0.668 & 0.651 & \textbf{0.565} & 0.672 \\
+    SSL ($r = 0.50$) & 0.647 & 0.663 & 0.480 & 0.654 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-SSL pretraining provides the largest gains on \texttt{sec\_enforcement} ($+0.092$ AUROC at $r = 0.50$ vs.\ scratch) and \texttt{bankruptcy} ($+0.052$ at $r = 0.15$). On \texttt{stock\_decline}, $r = 0.15$ provides a modest lift ($+0.009$). On \texttt{earnings\_restate}, $r = 0.50$ yields a small improvement ($+0.005$). No single mask ratio dominates across all outcomes: $r = 0.15$ is best for \texttt{stock\_decline} and \texttt{bankruptcy}, while $r = 0.50$ is best for \texttt{earnings\_restate} and \texttt{sec\_enforcement}.
+SSL pretraining provides modest and uneven gains. The largest is on \texttt{sec\_enforcement} ($+0.085$ AUROC at $r = 0.30$ vs.\ scratch), followed by \texttt{bankruptcy} ($+0.016$ at $r = 0.15$) and a marginal lift on \texttt{stock\_decline} ($+0.009$ at $r = 0.15$). On \texttt{earnings\_restate}, no mask ratio improves on the scratch baseline---all three are slightly lower. No single mask ratio dominates: $r = 0.15$ is best for \texttt{stock\_decline} and \texttt{bankruptcy}, $r = 0.30$ for \texttt{sec\_enforcement}, while $r = 0.50$ is never best.
 
-The strongest SSL result is on \texttt{sec\_enforcement}, where $r = 0.50$ (AUROC 0.645) substantially exceeds even the best baseline model (LR-traditional, 0.606). This is notable because \texttt{sec\_enforcement} is the outcome where the scratch FT-Transformer performed worst---suggesting that SSL pretraining may be most valuable precisely where supervised signal is weakest.
+The SSL gains are concentrated on \texttt{sec\_enforcement}, the outcome where the scratch FT-Transformer performs worst---here its AUROC (0.481) is below chance for this single-seed run on only 96 test positives. Pretraining lifts it to 0.565 at $r = 0.30$, consistent with the intuition that SSL helps most where supervised signal is weakest; but the pretrained model remains near chance and still below the best baseline on this outcome (LR-traditional, 0.606; \Cref{tab:auroc}), so we read it as a weak, high-variance signal rather than a decisive result.
 
 \Cref{fig:ssl_loss} shows the reconstruction loss during SSL pretraining for each mask ratio. Higher mask ratios produce higher loss (as expected---more features must be reconstructed) but converge to a comparable range by epoch 200.
 
@@ -186,38 +186,38 @@ With both models Optuna-tuned on identical protocols, the FT-Transformer meets t
 
 \begin{table}[ht]
   \centering
-  \caption{Go/no-go gate vs.\ default-hyperparameter XGBoost (sensitivity check). Both the from-scratch and SSL-pretrained ($r = 0.50$) FT-Transformer variants are shown.}
+  \caption{Go/no-go gate vs.\ default-hyperparameter XGBoost (sensitivity check), using the tuned from-scratch FT-Transformer. SSL pretraining is evaluated separately as an ablation (\Cref{tab:ssl}).}
   \label{tab:gate_default}
   \small
-  \begin{tabular}{@{}lccccc@{}}
+  \begin{tabular}{@{}lccc@{}}
     \toprule
-    Outcome & XGBoost & FT (scratch) & $\Delta$ & FT (SSL) & $\Delta$ \\
+    Outcome & XGBoost & FT (scratch) & $\Delta$ \\
     \midrule
-    \texttt{stock\_decline} & 0.653 & 0.667 & $+0.015$ & 0.670 & $+0.017$ \\
-    \texttt{earnings\_restate} & 0.651 & 0.685 & $+0.033$ & 0.675 & $+0.024$ \\
-    \texttt{sec\_enforcement} & 0.530 & 0.606 & $+0.075$ & 0.602 & $+0.071$ \\
-    \texttt{bankruptcy} & 0.615 & 0.648 & $+0.034$ & 0.672 & $+0.057$ \\
+    \texttt{stock\_decline} & 0.653 & 0.667 & $+0.015$ \\
+    \texttt{earnings\_restate} & 0.651 & 0.685 & $+0.033$ \\
+    \texttt{sec\_enforcement} & 0.530 & 0.606 & $+0.075$ \\
+    \texttt{bankruptcy} & 0.615 & 0.648 & $+0.034$ \\
     \midrule
-    Wins ($\geq 0.01$) & & & 4/4 & & 4/4 \\
+    Wins ($\geq 0.01$) & & & 4/4 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Against default-hyperparameter XGBoost the margin is wider---the FT-Transformer exceeds the 0.01 margin on all four outcomes (4/4), with the largest deltas on \texttt{sec\_enforcement} ($+0.075$ scratch) and \texttt{bankruptcy} ($+0.057$ SSL), and the advantage is statistically significant on two of four (\Cref{tab:bootstrap}). We report this for completeness but do not rely on it: pitting a tuned deep model against untuned tree baselines overstates the advantage, so the equal-budget comparison above is the appropriate basis for the gate decision.
+Against default-hyperparameter XGBoost the margin is wider---the FT-Transformer exceeds the 0.01 margin on all four outcomes (4/4), with the largest deltas on \texttt{sec\_enforcement} ($+0.075$) and \texttt{bankruptcy} ($+0.034$), and the advantage is statistically significant on two of four (\Cref{tab:bootstrap}). We report this for completeness but do not rely on it: pitting a tuned deep model against untuned tree baselines overstates the advantage, so the equal-budget comparison above is the appropriate basis for the gate decision.
 
-\Cref{fig:final_benchmark} shows test AUROC for all six models (default baselines) across the four outcomes, and \Cref{fig:bootstrap_ci} presents paired bootstrap 95\% confidence intervals on the AUROC difference (FT minus default XGBoost).
+\Cref{fig:final_benchmark} shows test AUROC for all five models (default baselines plus the tuned from-scratch FT-Transformer) across the four outcomes, and \Cref{fig:bootstrap_ci} presents paired bootstrap 95\% confidence intervals on the AUROC difference (FT minus default XGBoost).
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{../../results/study0/figures/final_benchmark_all_models.png}
-  \caption{Final benchmark (default baselines): test AUROC for all six models across four distress outcomes.}
+  \caption{Final benchmark (default baselines): test AUROC for all five models across four distress outcomes.}
   \label{fig:final_benchmark}
 \end{figure}
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{../../results/study0/figures/bootstrap_ci_forest_plot.png}
-  \caption{Paired bootstrap 95\% CIs on AUROC difference (FT-Transformer minus default XGBoost, $n = 1{,}000$ resamples). The dashed line indicates the 0.01 gate margin. Green circles: FT tuned (scratch); yellow squares: FT tuned + SSL.}
+  \caption{Paired bootstrap 95\% CIs on AUROC difference (from-scratch FT-Transformer minus default XGBoost, $n = 1{,}000$ resamples). The dashed line indicates the 0.01 gate margin.}
   \label{fig:bootstrap_ci}
 \end{figure}
 
@@ -225,19 +225,17 @@ Against default-hyperparameter XGBoost the margin is wider---the FT-Transformer 
 
 \begin{table}[ht]
   \centering
-  \caption{Paired bootstrap 95\% CIs on AUROC difference (FT minus default XGBoost, $n = 1{,}000$).}
+  \caption{Paired bootstrap 95\% CIs on AUROC difference (from-scratch FT-Transformer minus default XGBoost, $n = 1{,}000$).}
   \label{tab:bootstrap}
   \small
-  \begin{tabular}{@{}lcccc@{}}
+  \begin{tabular}{@{}lcc@{}}
     \toprule
-    Outcome & \multicolumn{2}{c}{FT scratch vs.\ XGB} & \multicolumn{2}{c}{FT SSL vs.\ XGB} \\
-    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
-     & $\Delta$ & 95\% CI & $\Delta$ & 95\% CI \\
+    Outcome & $\Delta$ & 95\% CI \\
     \midrule
-    \texttt{stock\_decline} & $+0.015$ & $[+0.008,\;+0.021]$ & $+0.017$ & $[+0.010,\;+0.023]$ \\
-    \texttt{earnings\_restate} & $+0.033$ & $[+0.020,\;+0.046]$ & $+0.024$ & $[+0.010,\;+0.037]$ \\
-    \texttt{sec\_enforcement} & $+0.075$ & $[-0.013,\;+0.162]$ & $+0.071$ & $[-0.013,\;+0.150]$ \\
-    \texttt{bankruptcy} & $+0.034$ & $[-0.022,\;+0.092]$ & $+0.057$ & $[-0.003,\;+0.120]$ \\
+    \texttt{stock\_decline} & $+0.015$ & $[+0.008,\;+0.021]$ \\
+    \texttt{earnings\_restate} & $+0.033$ & $[+0.020,\;+0.046]$ \\
+    \texttt{sec\_enforcement} & $+0.075$ & $[-0.013,\;+0.162]$ \\
+    \texttt{bankruptcy} & $+0.034$ & $[-0.022,\;+0.092]$ \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -252,7 +250,7 @@ To test whether the FT-Transformer's advantage is an artifact of the single 2020
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{../../results/study0/figures/walk_forward_delta.png}
-  \caption{Walk-forward AUROC difference (FT-Transformer minus XGBoost) across the seven expanding-window folds. The shaded band marks the two COVID-era test windows; the dotted line is the 0.01 gate margin. The \texttt{earnings\_restate} advantage is flat and consistently above the margin; \texttt{bankruptcy} is large but dips below zero only at 2020--2021; and the rare-event \texttt{sec\_enforcement} margin is volatile, decaying over time.}
+  \caption{Walk-forward AUROC difference (FT-Transformer minus XGBoost) across the seven expanding-window folds. The shaded band marks the two COVID-era test windows; the dotted line is the 0.01 gate margin. The \texttt{earnings\_restate} advantage is consistently positive across all seven folds---above the 0.01 gate margin in every fold except 2021--2022, where it narrows to $+0.004$; \texttt{bankruptcy} is large but dips below zero only at 2020--2021; and the rare-event \texttt{sec\_enforcement} margin is volatile, decaying over time.}
   \label{fig:walkforward}
 \end{figure}
 
@@ -267,7 +265,7 @@ To test whether the FT-Transformer's advantage is an artifact of the single 2020
     \midrule
     \texttt{earnings\_restate} & 7/7 & $+0.014$ & $[+0.004,\,+0.024]$ & FT wins both \\
     \texttt{bankruptcy} & 6/7 & $+0.037$ & $[-0.025,\,+0.074]$ & 1 of 2 (loses 2020--21) \\
-    \texttt{stock\_decline} & 5/7 & $+0.013$ & $[-0.005,\,+0.040]$ & 1 of 2 \\
+    \texttt{stock\_decline} & 5/7 & $+0.013$ & $[-0.004,\,+0.040]$ & 1 of 2 \\
     \texttt{sec\_enforcement} & 4/7 & $+0.024$ & $[-0.031,\,+0.110]$ & 1 of 2 \\
     \bottomrule
   \end{tabular}
