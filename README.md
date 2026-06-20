@@ -51,17 +51,30 @@ fin-jepa/
 │   └── utils/              # Logging, config helpers, reproducibility
 ├── configs/                # Hydra experiment configs (YAML)
 │   └── study0/
-├── scripts/                # Standalone pipeline runners
-│   └── run_market_pipeline.py
+├── scripts/                # Pipeline runners & reproduction scripts
+│   ├── download_data.py    #   Pull HF dataset for reproduction
+│   ├── run_market_pipeline.py
+│   ├── run_baseline_pipeline.py
+│   ├── run_ssl_experiment.py
+│   ├── generate_final_benchmark.py
+│   ├── run_robustness.py   #   Optuna tuning + equal-budget benchmark
+│   ├── rerun_consistency.py #  Walk-forward & multi-seed re-runs
+│   ├── plot_benchmarks.py
+│   └── plot_walk_forward.py
 ├── notebooks/              # Exploratory analysis
 │   └── explore_market_data.ipynb
 ├── experiments/            # Notebooks and scripts for each study
 │   └── study0/
+│       └── notebooks_archive/  # Original Colab notebooks (provenance only)
 ├── tests/                  # Unit + integration tests
 ├── results/                # Saved metrics, figures, paper assets
 │   └── study0/
+│       ├── corrected/      #   Optuna-tuned & leak-free re-run results
+│       └── figures/        #   Publication figures (committed)
 ├── paper/                  # LaTeX source for study reports
 │   └── study0/
+├── REPRODUCE.md            # Step-by-step reproduction guide (Study 0)
+├── CHANGELOG.md            # Notable changes log
 ├── data/                   # Data directory (NOT committed)
 │   ├── raw/                #   EDGAR caches, parquets, market prices
 │   ├── processed/          #   Label database, engineered features
@@ -204,7 +217,25 @@ still runs and produces the two EDGAR-derived labels (`stock_decline`, `earnings
 
 ---
 
-## Running Experiments
+## Reproducing Study 0
+
+The fastest path to reproduce all Study 0 results from the published dataset is
+documented in [`REPRODUCE.md`](REPRODUCE.md). In short:
+
+```bash
+pip install -e '.[hf]'
+python scripts/download_data.py              # pull data from HuggingFace
+python scripts/run_baseline_pipeline.py      # LR / XGB / GBT baselines
+python scripts/run_ssl_experiment.py         # SSL + FT-scratch (GPU)
+python scripts/generate_final_benchmark.py   # Table 1, bootstrap CIs
+python scripts/run_robustness.py close-out   # Optuna tuning, equal-budget gate (GPU)
+python scripts/rerun_consistency.py          # walk-forward, multi-seed (GPU)
+```
+
+## Running Experiments (from raw data)
+
+If you want to rebuild the dataset from EDGAR/yfinance instead of using the
+HuggingFace snapshot, follow the "Building the Dataset" steps above, then:
 
 ```bash
 # Study 0 benchmark (FT-Transformer vs baselines)
