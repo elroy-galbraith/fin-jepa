@@ -11,7 +11,7 @@ sequence of studies. Each study gates the next.
 
 | Study | Name | Gate Criterion |
 |-------|------|----------------|
-| **Study 0** | Financial Encoder Validation | FT-Transformer beats XGBoost on ≥3/5 distress outcomes |
+| **Study 0** | Financial Encoder Validation | FT-Transformer beats XGBoost on ≥3/5 distress outcomes (paper result: 3/4 equal-budget, 4/4 default) |
 | Study 1 | JEPA Pretraining on XBRL | Latent prediction loss converges; transfer > from-scratch |
 | Study 2 | Cross-Modal Grounding (Text) | 8-K/MD&A alignment improves downstream AUC |
 | Study 3 | Multi-Horizon Forecasting | Encoder generalizes across forecast horizons |
@@ -37,6 +37,7 @@ Also tests whether masked-feature self-supervised pretraining helps.
 - [x] **Data Splits** — Reproducible time-based train/val/test splits
 - [x] **Ablations** — Ablation studies and scaling curves
 - [x] **Paper** — Study 0 technical report (`paper/study0/`)
+- [x] **Reproduction** — Script-based pipeline + HuggingFace dataset ([`REPRODUCE.md`](REPRODUCE.md))
 
 ---
 
@@ -44,6 +45,7 @@ Also tests whether masked-feature self-supervised pretraining helps.
 
 ```
 fin-jepa/
+├── REPRODUCE.md            # Step-by-step Study 0 reproduction guide
 ├── src/fin_jepa/
 │   ├── data/               # Ingestion, cleaning, label construction, splits
 │   ├── models/             # FT-Transformer, baselines, SSL pretraining head
@@ -51,8 +53,16 @@ fin-jepa/
 │   └── utils/              # Logging, config helpers, reproducibility
 ├── configs/                # Hydra experiment configs (YAML)
 │   └── study0/
-├── scripts/                # Standalone pipeline runners
-│   └── run_market_pipeline.py
+├── scripts/                # Standalone pipeline runners + reproduction scripts
+│   ├── run_market_pipeline.py
+│   ├── run_baseline_pipeline.py
+│   ├── run_ssl_experiment.py
+│   ├── run_robustness.py
+│   ├── generate_final_benchmark.py
+│   ├── rerun_consistency.py
+│   ├── download_data.py
+│   ├── prepare_hf_dataset.py
+│   └── ...                 # plotting, auditing, verification utilities
 ├── notebooks/              # Exploratory analysis
 │   └── explore_market_data.ipynb
 ├── experiments/            # Notebooks and scripts for each study
@@ -81,6 +91,9 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 
 # Install (editable + dev extras)
 pip install -e ".[dev,sec]"
+
+# For reproduction from HuggingFace dataset (no SEC download needed)
+pip install -e ".[hf]"
 ```
 
 ### Environment Variables
@@ -91,7 +104,22 @@ pip install -e ".[dev,sec]"
 
 ---
 
-## Building the Dataset
+## Quick Reproduction (from HuggingFace)
+
+The fastest way to reproduce Study 0 results is from the published dataset — no SEC
+download required. See [`REPRODUCE.md`](REPRODUCE.md) for the full step-by-step guide.
+
+```bash
+pip install -e ".[hf]"
+python scripts/download_data.py          # pulls parquets from elroyg/fin-jepa-study0
+python scripts/run_baseline_pipeline.py  # baselines
+python scripts/run_ssl_experiment.py     # FT-Transformer + SSL (GPU recommended)
+python scripts/generate_final_benchmark.py
+```
+
+---
+
+## Building the Dataset from EDGAR
 
 The data pipeline has four sequential steps. Each step caches its HTTP responses
 to disk, so interrupted runs resume where they left off.

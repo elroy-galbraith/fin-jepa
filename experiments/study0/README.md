@@ -77,12 +77,11 @@ All results land in `results/study0/`:
 
 | File | Produced by |
 |------|-------------|
-| `benchmark_results.json` | NB 01 |
-| `ft_sweep_results.json` | NB 02 |
-| `ssl_experiment_results_v2.json` | NB 03 |
-| `final_benchmark.json` | NB 04 |
-| `multiseed_results.json` | NB 05 (section 5c) |
-| `multiseed_ssl.json` | NB 05 (section 5d) |
-| `walk_forward_results.json` | NB 05 (section 5e) |
-| `ft_transformer_tuning.json` | NB 05 (section 5b) |
-| `verification_report.json` | NB 06 |
+| `baseline_results.json` | NB 01 (now: `run_baseline_pipeline.py`) |
+| `ft_sweep_results.json` | NB 02 (notebook-only; not produced by scripts) |
+| `ssl_experiment_results.json` | NB 03 (now: `run_ssl_experiment.py`) |
+| `final_benchmark.json` | NB 04 (now: `generate_final_benchmark.py`) |
+| `corrected/multiseed_results.json` | NB 05 (now: `rerun_consistency.py`) |
+| `corrected/walk_forward_results.json` | NB 05 (now: `rerun_consistency.py`) |
+| `corrected/ft_transformer_tuning.json` | NB 05 (now: `run_robustness.py close-out`) |
+| `corrected/benchmark_results.json` | NB 05 (now: `run_robustness.py close-out`) |
